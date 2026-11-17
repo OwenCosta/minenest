@@ -456,7 +456,7 @@ async function tabInternet(s, full) {
     section("How friends elsewhere join", null,
       h("div", { class: "types" }, kinds.map(([k, name, about]) => h("button", { class: "type" + ((way.kind || "") === k ? " on" : ""), onclick: () => {
         if (k === "vps") { S.vpsOpen = true; tabInternet(S.status, true); return; }
-        if (k === "relay" && !S.info.account) { openAccount(); toast("Sign in with your XenithOS profile first.", true); return; }
+        if (k === "relay" && !S.info.account) { openAccount(); toast("Sign in with your OCAccount first.", true); return; }
         act(() => api("POST", sp("/way"), { kind: k }), k ? `${name} is the way in now.` : "Only people at home can join now.");
       } }, h("span", { class: "radio" }), h("b", {}, name), h("span", {}, about)))),
       way.kind === "relay" && ["paper", "purpur"].includes(s.flavor) ? h("label", { class: "check mt" }, h("input", { type: "checkbox", checked: s.real_ips, onchange: (e) => act(() => api("PATCH", sp(), { real_ips: e.target.checked }), "Saved. It counts from the next start.") }),
@@ -648,20 +648,40 @@ async function openAccount() {
   let r;
   try { r = await api("GET", "/api/account"); } catch (e) { fill(el, msg("bad", null, e.message)); return; }
   if (r.signed_in && !r.step) { try { r = await api("POST", "/api/relay/status", {}); } catch (e) { toast(e.message, true); } }
-  const head = h("div", { class: "srv-head" }, h("div", {}, h("h1", {}, "Account"), h("div", { class: "sub" }, "Your XenithOS profile and the supporter relay")),
+  const head = h("div", { class: "srv-head" }, h("div", {}, h("h1", {}, "Account"), h("div", { class: "sub" }, "Your OCAccount and the supporter relay")),
     h("button", { class: "link", onclick: () => { S.view = "server"; refresh().then(() => renderTab(true)); } }, "Back to servers"));
   if (!r.signed_in) {
     const n = h("input", { placeholder: "Profile name" }), pin = h("input", { type: "password", inputmode: "numeric" });
     const go = (create) => act(() => api("POST", "/api/account/login", { name: n.value, pin: pin.value, create }), create ? "Profile made, you're signed in." : "Signed in.").then((a) => { if (a && a.name) { S.info.account = a.name; openAccount(); } });
+    const status = h("div");
+    const ocBtn = h("button", { class: "btn primary big", onclick: async () => {
+      let st;
+      try { st = await api("POST", "/api/account/oc/start"); } catch (e) { fill(status, msg("bad", null, e.message)); return; }
+      window.open(st.url, "_blank", "noopener");
+      ocBtn.disabled = true;
+      fill(status, msg("", "Waiting", "Sign in on the OCAccounts page that opened, then come back here. ", h("a", { href: st.url, target: "_blank", rel: "noopener" }, "Open it again")));
+      for (let i = 0; i < 300 && S.view === "account"; i++) {
+        await new Promise((ok) => setTimeout(ok, 2000));
+        let p;
+        try { p = await api("POST", "/api/account/oc/poll"); } catch (e) { continue; }
+        if (p.state === "done") { S.info.account = p.name; toast(`Signed in as ${p.name}.`); openAccount(); return; }
+        if (p.state === "error" || p.state === "none") { ocBtn.disabled = false; fill(status, msg("bad", null, p.error || "The sign-in ran out. Try again.")); return; }
+      }
+      ocBtn.disabled = false;
+    } }, "Sign in with your OCAccount");
+    const pinBox = h("div", { class: "hidden mt" },
+      h("div", { class: "form", style: "max-width:480px" }, h("label", {}, "Profile name"), n, h("label", {}, "PIN"), pin),
+      h("div", { class: "row mt" }, h("button", { class: "btn", onclick: () => go(false) }, "Sign in"), h("button", { class: "btn", onclick: () => go(true) }, "Make a new profile")));
     fill(el, head, h("div", { class: "mt" }), section("Sign in", null,
-      h("p", { class: "muted" }, "MineNest uses the same profile as XenithOS. You only need one for the supporter relay; everything else works without."),
-      h("div", { class: "form", style: "max-width:480px" }, h("label", {}, "Name"), n, h("label", {}, "PIN"), pin),
-      h("div", { class: "row mt" }, h("button", { class: "btn primary", onclick: () => go(false) }, "Sign in"), h("button", { class: "btn", onclick: () => go(true) }, "Make a new profile"))));
+      h("p", { class: "muted" }, "Sign in with your OCAccount (owencosta.diy). It's what the supporter relay goes by: link your Patreon to the same account and your server gets its own address. Everything else in MineNest works without signing in."),
+      ocBtn, status,
+      h("p", { class: "mt" }, h("button", { class: "link", onclick: () => pinBox.classList.toggle("hidden") }, "Or use a XenithOS profile's name and PIN")),
+      pinBox));
     return;
   }
   const claimName = h("input", { placeholder: r.suggest || "your-server", value: r.name || "" });
   fill(el, head, h("div", { class: "mt" }),
-    section("Profile", null, h("div", { class: "row" }, h("span", {}, "Signed in as ", h("b", {}, r.account)),
+    section("Account", null, h("div", { class: "row" }, h("span", {}, "Signed in as ", h("b", {}, r.account), r.oc_account ? h("span", { class: "muted" }, ` (OCAccount ${r.oc_account})`) : null),
       h("button", { class: "btn small", onclick: () => act(() => api("POST", "/api/account/logout"), "Signed out.").then(() => { S.info.account = ""; openAccount(); }) }, "Sign out"))),
     section("Supporter relay", "your own address, for supporters on Patreon",
       !r.open ? msg("warn", "Closed", "The relay isn't taking supporters right now.") : null,

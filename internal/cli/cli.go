@@ -54,7 +54,8 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
   minenest bedrock [-s SERVER] on|off|update   Bedrock players through Geyser (Paper)
   minenest sshkey                       MineNest's key, for a VPS's authorized_keys
 
-  minenest account [login|create|logout]   your XenithOS profile (for the supporter relay)
+  minenest account [login|logout]       sign in with your OCAccount (for the supporter relay)
+                                        (login --pin: a XenithOS profile's name and PIN instead)
   minenest relay [status|claim NAME|release]  your own address as a supporter on Patreon
 
   minenest autostart on|off             start MineNest when you sign in
@@ -941,12 +942,44 @@ func account(c *client, f flags) error {
 			return err
 		}
 		if !r.SignedIn {
-			fmt.Println("Not signed in. Sign in with your XenithOS profile: minenest account login (or make one: minenest account create)")
+			fmt.Println("Not signed in. Sign in with your OCAccount: minenest account login")
+			fmt.Println("(or with a XenithOS profile's name and PIN: minenest account login --pin)")
+		} else if r.OCAccount != "" {
+			fmt.Printf("Signed in as %s, with the OCAccount %s.\n", r.Account, r.OCAccount)
 		} else {
 			fmt.Println("Signed in as " + r.Account + ".")
 		}
 		return nil
-	case "login", "create":
+	case "login", "oc", "ocaccount":
+		if f.bools["pin"] {
+			break
+		}
+		var st struct{ URL string }
+		if err := c.post("/api/account/oc/start", nil, &st); err != nil {
+			return err
+		}
+		fmt.Println("Sign in with your OCAccount in your browser:\n  " + st.URL)
+		openBrowser(st.URL)
+		for i := 0; i < 300; i++ {
+			time.Sleep(2 * time.Second)
+			var p nest.OCState
+			if err := c.post("/api/account/oc/poll", nil, &p); err != nil {
+				return err
+			}
+			switch p.State {
+			case "done":
+				fmt.Printf("Signed in as %s (OCAccount %s).\n", p.Name, p.Account)
+				return nil
+			case "error":
+				return fmt.Errorf("%s", p.Error)
+			case "none":
+				return fmt.Errorf("the sign-in ran out. Try again")
+			}
+		}
+		return fmt.Errorf("the sign-in ran out. Try again")
+	}
+	switch sub {
+	case "login", "create", "pin":
 		name := f.vals["name"]
 		if name == "" && len(f.pos) > 1 {
 			name = f.pos[1]
@@ -967,7 +1000,7 @@ func account(c *client, f flags) error {
 	case "logout":
 		return c.post("/api/account/logout", nil, nil)
 	}
-	return fmt.Errorf("unknown: minenest account %s (login, create, logout)", sub)
+	return fmt.Errorf("unknown: minenest account %s (login, login --pin, create, logout)", sub)
 }
 
 func relay(c *client, f flags) error {

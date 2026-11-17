@@ -80,3 +80,10 @@ WantedBy=default.target
 func autostartOn() bool { return fileExists(unitPath()) }
 
 func showError(msg string) { fmt.Fprintln(os.Stderr, msg) }
+
+// openBrowser opens a page in the default web browser, if there's a desktop.
+func openBrowser(url string) {
+	if os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "" {
+		exec.Command("xdg-open", url).Start()
+	}
+}

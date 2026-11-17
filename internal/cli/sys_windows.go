@@ -76,3 +76,6 @@ func showError(msg string) {
 	m, _ := windows.UTF16PtrFromString(msg)
 	windows.MessageBox(0, m, t, windows.MB_OK|windows.MB_ICONERROR)
 }
+
+// openBrowser opens a page in the default web browser.
+func openBrowser(url string) { exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start() }

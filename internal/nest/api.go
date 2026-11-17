@@ -671,6 +671,11 @@ func (a *api) routes() http.Handler {
 		}
 		return a.m.Login(r.Context(), o.Name, o.Pin, o.Create)
 	})
+	h("POST /api/account/oc/start", func(r *http.Request) (any, error) {
+		u, err := a.m.OCStart(r.Context())
+		return map[string]string{"url": u}, err
+	})
+	h("POST /api/account/oc/poll", func(r *http.Request) (any, error) { return a.m.OCPoll(r.Context()), nil })
 	h("POST /api/account/logout", func(r *http.Request) (any, error) {
 		a.m.Logout(r.Context())
 		return nil, nil

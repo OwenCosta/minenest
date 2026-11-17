@@ -432,3 +432,57 @@ func TestPingLive(t *testing.T) {
 	}
 	t.Logf("%+v", r)
 }
+
+// Signing in with an OCAccount: start, the browser part (the stand-in's "approve"), then poll.
+func TestOCSignIn(t *testing.T) {
+	t.Setenv("MINENEST_HOME", t.TempDir())
+	approved := false
+	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		switch r.URL.Path {
+		case "/v1/oc/start":
+			io.WriteString(w, "session=s1\nkey=k1\nurl=https://owencosta.diy/account/?client_id=mn&state=s1\n")
+		case "/v1/oc/poll":
+			if r.PostForm.Get("session") != "s1" || r.PostForm.Get("key") != "k1" {
+				w.WriteHeader(404)
+				io.WriteString(w, "error=That sign-in isn't here.\n")
+				return
+			}
+			if !approved {
+				io.WriteString(w, "state=waiting\n")
+				return
+			}
+			io.WriteString(w, "state=done\nname=Owen\ntoken=tok9\naccount=OwenOC\n")
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer cloud.Close()
+	t.Setenv("MINENEST_CLOUD", cloud.URL)
+	m, _ := NewManager()
+	if st := m.OCPoll(t.Context()); st.State != "none" {
+		t.Fatal(st)
+	}
+	u, err := m.OCStart(t.Context())
+	if err != nil || !strings.Contains(u, "owencosta.diy/account/") {
+		t.Fatal(u, err)
+	}
+	if st := m.OCPoll(t.Context()); st.State != "waiting" {
+		t.Fatal(st)
+	}
+	approved = true
+	st := m.OCPoll(t.Context())
+	if st.State != "done" || st.Name != "Owen" || st.Account != "OwenOC" {
+		t.Fatal(st)
+	}
+	set := m.Settings()
+	if set.AccountToken != "tok9" || set.AccountName != "Owen" || set.OCAccount != "OwenOC" {
+		t.Fatal(set)
+	}
+	if ri := m.RelayInfo(); !ri.SignedIn || ri.OCAccount != "OwenOC" {
+		t.Fatal(ri)
+	}
+	if st := m.OCPoll(t.Context()); st.State != "none" {
+		t.Fatal("finished sign-ins are forgotten", st)
+	}
+}

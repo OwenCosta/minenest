@@ -76,10 +76,15 @@ minenest create "Cobblemon" --modpack cobblemon-fabric
 ## The supporter relay
 
 Supporters on [Patreon](https://www.patreon.com/) get a name of their own for their server,
-which friends type in Minecraft, without playit.gg, a VPS or router changes. Sign in with your
-XenithOS profile on MineNest's **Account** page (or `minenest account login`), link it to your
-Patreon on OCAccounts, pick a name, and choose **Supporter relay** on the server's Internet
-page. With Paper or Purpur, players' real addresses come through too, so bans by address work.
+which friends type in Minecraft, without playit.gg, a VPS or router changes:
+
+1. On MineNest's **Account** page choose **Sign in with your OCAccount** (or run
+   `minenest account login`). Your browser opens your OCAccount at owencosta.diy.
+2. On your OCAccount, link your Patreon, and link (or make) your XenithOS profile.
+3. Back in MineNest, pick a name, and choose **Supporter relay** on the server's Internet page.
+
+With Paper or Purpur, players' real addresses come through too, so bans by address work. A
+XenithOS profile's name and PIN still work instead of an OCAccount (`minenest account login --pin`).
 
 ## How it works
 

@@ -113,7 +113,7 @@ func (m *Manager) Login(ctx context.Context, name, pin string, create bool) (*Ac
 	if kv["token"] == "" {
 		return nil, fmt.Errorf("XenithOS Cloud didn't send a sign-in")
 	}
-	m.updateSettings(func(s *Settings) { s.AccountName, s.AccountToken = kv["name"], kv["token"] })
+	m.updateSettings(func(s *Settings) { s.AccountName, s.AccountToken, s.OCAccount = kv["name"], kv["token"], "" })
 	return &Account{Name: kv["name"], Cloud: m.Settings().Cloud}, nil
 }
 
@@ -131,7 +131,7 @@ func (m *Manager) Logout(ctx context.Context) {
 	if tok := m.Settings().AccountToken; tok != "" {
 		m.cloudPost(ctx, "/v1/accounts/logout", url.Values{"token": {tok}})
 	}
-	m.updateSettings(func(s *Settings) { s.AccountName, s.AccountToken = "", "" })
+	m.updateSettings(func(s *Settings) { s.AccountName, s.AccountToken, s.OCAccount = "", "", "" })
 }
 
 // ------------------------------------------------------------------ the relay
@@ -140,6 +140,7 @@ func (m *Manager) Logout(ctx context.Context) {
 type RelayInfo struct {
 	SignedIn  bool   `json:"signed_in"`
 	Account   string `json:"account"`
+	OCAccount string `json:"oc_account"`
 	Open      bool   `json:"open"`    // the relay is taking supporters
 	Step      string `json:"step"`    // ok, link, patreon, tier, error
 	Message   string `json:"message"` // what XenithOS Cloud says about where they are
@@ -164,7 +165,7 @@ func (r *relayState) info() RelayInfo {
 	l := r.last
 	r.mu.Unlock()
 	until, _ := strconv.ParseInt(l["until"], 10, 64)
-	ri := RelayInfo{SignedIn: set.AccountToken != "", Account: set.AccountName, Open: l["relay"] == "on", Step: l["step"],
+	ri := RelayInfo{SignedIn: set.AccountToken != "", Account: set.AccountName, OCAccount: set.OCAccount, Open: l["relay"] == "on", Step: l["step"],
 		Message: l["message"], Tier: l["tier"], Name: l["name"], State: l["state"], Address: l["address"], Domain: l["domain"],
 		Suggest: l["suggest"], Held: l["held"], Patreon: l["patreon"], LinkURL: l["account"], Until: until,
 		Proxy: l["proxy"] == "on", ProxyAble: l["proxy_able"] == "1"}
@@ -367,4 +368,63 @@ func (r *relayState) wayFor(s *Server) way {
 		return ""
 	}
 	return w
+}
+
+// ------------------------------------------------------------------ signing in with an OCAccount
+
+// OCStart begins signing in with an OCAccount: XenithOS Cloud gives the OCAccounts page to open
+// in a browser, and a session MineNest then polls (OCPoll) until the person has agreed there. The
+// XenithOS profile linked to the OCAccount is what's signed in, as with a name and PIN.
+func (m *Manager) OCStart(ctx context.Context) (string, error) {
+	kv, code, err := m.cloudPost(ctx, "/v1/oc/start", url.Values{})
+	if err != nil {
+		if code == 404 {
+			return "", fmt.Errorf("signing in with an OCAccount isn't open yet. Use a XenithOS profile's name and PIN for now")
+		}
+		return "", err
+	}
+	if kv["url"] == "" || kv["session"] == "" {
+		return "", fmt.Errorf("XenithOS Cloud's answer was incomplete. Try again")
+	}
+	m.mu.Lock()
+	m.ocSession, m.ocKey = kv["session"], kv["key"]
+	m.mu.Unlock()
+	return kv["url"], nil
+}
+
+type OCState struct {
+	State   string `json:"state"` // waiting, done, error, none
+	Error   string `json:"error,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Account string `json:"account,omitempty"`
+}
+
+func (m *Manager) OCPoll(ctx context.Context) OCState {
+	m.mu.Lock()
+	sid, key := m.ocSession, m.ocKey
+	m.mu.Unlock()
+	if sid == "" {
+		return OCState{State: "none"}
+	}
+	kv, _, err := m.cloudPost(ctx, "/v1/oc/poll", url.Values{"session": {sid}, "key": {key}})
+	if err != nil {
+		m.mu.Lock()
+		m.ocSession = ""
+		m.mu.Unlock()
+		return OCState{State: "error", Error: err.Error()}
+	}
+	switch kv["state"] {
+	case "done":
+		m.mu.Lock()
+		m.ocSession = ""
+		m.mu.Unlock()
+		m.updateSettings(func(s *Settings) { s.AccountName, s.AccountToken, s.OCAccount = kv["name"], kv["token"], kv["account"] })
+		return OCState{State: "done", Name: kv["name"], Account: kv["account"]}
+	case "error":
+		m.mu.Lock()
+		m.ocSession = ""
+		m.mu.Unlock()
+		return OCState{State: "error", Error: kv["error"]}
+	}
+	return OCState{State: "waiting"}
 }

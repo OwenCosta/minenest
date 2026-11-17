@@ -18,6 +18,7 @@ type Settings struct {
 	Cloud        string `json:"cloud"`         // XenithOS Cloud, for the account and the supporter relay
 	AccountName  string `json:"account_name"`  // the signed-in XenithOS profile
 	AccountToken string `json:"account_token"` // its token (the file is readable by this user only)
+	OCAccount    string `json:"oc_account"`    // the OCAccount it was signed in with, if any
 	APIPort      int    `json:"api_port"`
 	LANAccess    bool   `json:"lan_access"` // the GUI can be opened from other computers at home (with the key)
 }
@@ -30,6 +31,8 @@ type Manager struct {
 	Jobs     jobList
 	playit   *playitAgent
 	relay    *relayState
+
+	ocSession, ocKey string // an OCAccount sign-in waiting for the browser
 }
 
 func NewManager() (*Manager, error) {
