@@ -136,7 +136,8 @@ func unzip(src, dest string, strip int) error {
 		if !within(dest, target) {
 			return fmt.Errorf("the archive has a file outside its folder (%s)", f.Name)
 		}
-		if f.FileInfo().IsDir() {
+		// Windows' own zip tool writes folders as "name\", which IsDir doesn't see.
+		if f.FileInfo().IsDir() || strings.HasSuffix(name, "/") {
 			os.MkdirAll(target, 0o755)
 			continue
 		}

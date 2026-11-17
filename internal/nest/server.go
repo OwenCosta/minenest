@@ -28,21 +28,22 @@ const (
 // Config is what MineNest keeps about a server (servers/<id>/nest.json). The server's own files
 // are in servers/<id>/server.
 type Config struct {
-	Name        string     `json:"name"`
-	Flavor      string     `json:"flavor"`
-	Want        string     `json:"want"` // "latest" or a Minecraft version
-	Installed   *Installed `json:"installed,omitempty"`
-	RAM         int        `json:"ram_mb"`
-	JVMArgs     string     `json:"jvm_args,omitempty"`
-	Eula        string     `json:"eula,omitempty"` // when the user agreed to Minecraft's EULA in MineNest
-	Autostart   bool       `json:"autostart"`
-	AutoRestart bool       `json:"auto_restart"`
-	Way         string     `json:"way"` // "", "playit", "vps" or "relay": the way in from the internet
-	VPS         VPSConfig  `json:"vps"`
-	Bedrock     bool       `json:"bedrock"`
-	RealIPs     bool       `json:"real_ips"` // players' real addresses through the relay (Paper)
-	Modpack     string     `json:"modpack,omitempty"`
-	Created     time.Time  `json:"created"`
+	Name         string     `json:"name"`
+	Flavor       string     `json:"flavor"`
+	Want         string     `json:"want"` // "latest" or a Minecraft version
+	Installed    *Installed `json:"installed,omitempty"`
+	RAM          int        `json:"ram_mb"`
+	JVMArgs      string     `json:"jvm_args,omitempty"`
+	Eula         string     `json:"eula,omitempty"` // when the user agreed to Minecraft's EULA in MineNest
+	Autostart    bool       `json:"autostart"`
+	AutoRestart  bool       `json:"auto_restart"`
+	Way          string     `json:"way"` // "", "playit", "vps" or "relay": the way in from the internet
+	VPS          VPSConfig  `json:"vps"`
+	Bedrock      bool       `json:"bedrock"`
+	RealIPs      bool       `json:"real_ips"` // players' real addresses through the relay (Paper)
+	Modpack      string     `json:"modpack,omitempty"`
+	ImportedFrom string     `json:"imported_from,omitempty"`
+	Created      time.Time  `json:"created"`
 }
 
 type Line struct {

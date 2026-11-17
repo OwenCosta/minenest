@@ -6,7 +6,7 @@
 set -eu
 
 repo=OwenCosta/minenest
-base="https://github.com/$repo/releases/latest/download"
+base="${MINENEST_RELEASE_URL:-https://github.com/$repo/releases/latest/download}"
 case "$(uname -m)" in
     x86_64|amd64) arch=amd64 ;;
     aarch64|arm64) arch=arm64 ;;

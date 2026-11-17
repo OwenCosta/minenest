@@ -561,8 +561,7 @@ function openCreate() {
     }
   };
   fill(el,
-    h("div", { class: "srv-head" }, h("div", {}, h("h1", {}, "New server"), h("div", { class: "sub" }, "Everything here can be changed later in the server's Settings.")),
-      h("button", { class: "link", onclick: () => { S.view = "server"; refresh().then(() => renderTab(true)); } }, "Cancel")),
+    createHead("new"),
     h("div", { class: "create mt" },
       h("div", {},
         section(h("span", {}, h("span", { class: "step" }, "1"), "Server type"), "what it runs",
@@ -581,6 +580,63 @@ function openCreate() {
   drawPicker();
   drawSummary();
   name.focus();
+}
+
+function createHead(mode) {
+  return [h("div", { class: "srv-head" }, h("div", {}, h("h1", {}, mode === "new" ? "New server" : "Add a server you already have"),
+      h("div", { class: "sub" }, mode === "new" ? "Everything here can be changed later in the server's Settings." : "MineNest copies it, so the original folder stays as it was.")),
+      h("button", { class: "link", onclick: () => { S.view = "server"; refresh().then(() => renderTab(true)); } }, "Cancel")),
+    h("div", { class: "tabs" },
+      h("button", { class: mode === "new" ? "on" : "", onclick: openCreate }, "Make a new one"),
+      h("button", { class: mode === "add" ? "on" : "", onclick: openImport }, "Add one you already have"))];
+}
+
+// Bringing in a server that's already on this computer: found by looking, typed, or a zip.
+function openImport() {
+  S.view = "create"; renderSide(); show("create");
+  const el = $("create");
+  const found = h("div", {}, h("p", { class: "muted" }, "Looking through this computer's usual folders..."));
+  const path = h("input", { placeholder: S.info.os === "windows" ? "C:\\Users\\you\\Desktop\\My Server" : "/home/you/minecraft-server" });
+  const name = h("input", { placeholder: "Taken from the folder's name", maxlength: 40 });
+  const flavor = h("select", {}, h("option", { value: "" }, "Work it out"), S.info.flavors.map((f) => h("option", { value: f.id }, f.name)));
+  const version = h("input", { placeholder: "Work it out (or type one, like 1.21.4)" });
+  const zip = h("input", { type: "file", accept: ".zip", class: "hidden" });
+  const zipName = h("span", { class: "muted" }, "No zip chosen");
+  zip.onchange = () => (zipName.textContent = zip.files[0] ? `${zip.files[0].name}, ${(zip.files[0].size / 1048576).toFixed(0)} MB` : "No zip chosen");
+  const done = (r) => { if (r && r.id) { S.cur = r.id; S.view = "server"; localStorage.setItem("mn-cur", r.id); refresh().then(() => setTab("overview")); } };
+  const opts = () => ({ name: name.value.trim(), flavor: flavor.value, version: version.value.trim() });
+  const add = async (p, extra) => done(await act(() => api("POST", "/api/import", { path: p, ...opts(), ...(extra || {}) })));
+  const sendZip = async (btn) => {
+    const f = zip.files[0];
+    if (!f) { toast("Choose a zip first.", true); return; }
+    btn.disabled = true; btn.textContent = "Uploading...";
+    const o = opts();
+    const q = new URLSearchParams({ filename: f.name, name: o.name, flavor: o.flavor, version: o.version });
+    done(await act(() => api("POST", "/api/import/zip?" + q, f, true)));
+    btn.disabled = false; btn.textContent = "Upload and add";
+  };
+  fill(el, createHead("add"),
+    section("Found on this computer", "servers in your usual folders", found),
+    section("Or say where it is", null,
+      h("div", { class: "form" }, h("label", {}, "Its folder"), path, h("div", { class: "help" }, "The folder with server.properties in it.")),
+      h("div", { class: "row mt" }, h("button", { class: "btn primary", onclick: () => path.value.trim() ? add(path.value.trim()) : toast("Type the folder first.", true) }, "Add it"))),
+    section("Or upload it", "a zip of the server's folder, from anywhere",
+      h("div", { class: "row" }, h("button", { class: "btn", onclick: () => zip.click() }, "Choose a zip..."), zipName, zip),
+      h("div", { class: "row mt" }, h("button", { class: "btn primary", onclick: (e) => sendZip(e.target) }, "Upload and add"))),
+    section("Details", "only if MineNest can't tell by itself",
+      h("div", { class: "form" }, h("label", {}, "Name in MineNest"), name, h("label", {}, "Server type"), flavor, h("label", {}, "Minecraft version"), version)));
+  (async () => {
+    let list;
+    try { list = await api("GET", "/api/import/find"); } catch (e) { fill(found, msg("bad", null, e.message)); return; }
+    fill(found, list.length ? list.map((f) => h("div", { class: "list-row" },
+      h("div", { class: "grow" }, h("b", {}, f.name), h("span", { class: "muted" }, `  ${f.flavor ? S.info.flavors.find((x) => x.id === f.flavor)?.name || f.flavor : "Unknown type"} ${f.version || "(version unknown)"}${f.has_world ? ", has a world" : ""}`),
+        h("div", { class: "small muted", style: "word-break:break-all" }, f.path)),
+      f.imported ? h("span", { class: "muted small" }, "Already added") : null,
+      h("button", { class: "btn small" + (f.imported ? "" : " primary"), onclick: () => {
+        if (!f.version && !version.value.trim()) { toast("MineNest can't tell its Minecraft version: type it under Details, then choose Add.", true); version.focus(); return; }
+        add(f.path, { name: name.value.trim() || f.name });
+      } }, "Add"))) : h("p", { class: "muted" }, "No servers found in the usual places. Type its folder below, or upload a zip."));
+  })();
 }
 
 // ------------------------------------------------------------------ account and relay

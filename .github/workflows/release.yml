@@ -31,6 +31,7 @@ jobs:
           done
           cp scripts/install.sh scripts/install.ps1 dist/
           cp internal/web/static/icon.svg dist/minenest.svg
+          cp assets/minenest.ico assets/minenest.png dist/
           cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
       - name: Publish
         env:

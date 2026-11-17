@@ -25,7 +25,10 @@ command line.
 - **Players, settings, worlds:** whitelist, operators, bans, kicks; every server.properties
   setting with friendly names; backups that work while the server runs; put one back or start a
   new world.
-- **Bring your own:** `minenest import` copies a server you already have into MineNest.
+- **Bring the servers you already have:** MineNest finds the ones on your computer, or you point
+  it at a folder or upload a zip of one (**New server**, then **Add one you already have**, or
+  `minenest import FOLDER`). It's copied in with its world, mods, plugins and settings, and the
+  original is left as it was.
 
 ## Install
 

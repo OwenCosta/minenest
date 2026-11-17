@@ -23,6 +23,9 @@ type ImportOptions struct {
 	Flavor  string `json:"flavor"`  // "" to work it out
 	Version string `json:"version"` // "" to work it out
 	RAM     int    `json:"ram_mb"`
+	ZipName string `json:"-"`
+
+	cleanup string // a folder to remove afterwards (an unpacked zip)
 }
 
 var mcInHistory = regexp.MustCompile(`\(MC: ([0-9.]+)\)`)
@@ -128,12 +131,29 @@ func (m *Manager) Import(o ImportOptions) (*Server, *Job, error) {
 	s.setBusy("the import", false)
 	job := m.Jobs.start("Bringing in "+o.Name, s.ID, func(ctx context.Context, j *Job) (any, error) {
 		defer s.setBusy("", false)
+		if o.cleanup != "" {
+			defer os.RemoveAll(o.cleanup)
+		} else {
+			s.update(func(c *Config) { c.ImportedFrom = src })
+		}
 		if err := copyTree(ctx, src, s.Root(), j); err != nil {
 			return nil, err
 		}
 		// Old launch files from elsewhere would only confuse; MineNest runs it.
 		for _, n := range []string{"installed.txt"} {
 			os.Remove(filepath.Join(s.Root(), n))
+		}
+		// Another MineNest server may already use its port: give it a free one.
+		port := s.Port()
+		for _, o := range m.List() {
+			if o != s && o.Port() == port {
+				p := s.props()
+				free := m.freePort()
+				p.Set("server-port", fmt.Sprint(free))
+				p.Save()
+				s.Note("Its port %d is used by %s here, so it's on port %d now.", port, o.Config().Name, free)
+				break
+			}
 		}
 		inst, err := installFlavor(ctx, s.Root(), flavor, version, "", j)
 		if err != nil {
@@ -143,7 +163,11 @@ func (m *Manager) Import(o ImportOptions) (*Server, *Job, error) {
 		if s.eulaAgreed() {
 			s.update(func(c *Config) { c.Eula = "kept from " + src })
 		}
-		s.Note("Brought in from %s as %s %s.", src, flavorName(flavor), version)
+		if o.cleanup != "" {
+			s.Note("Brought in from %s as %s %s.", o.ZipName, flavorName(flavor), version)
+		} else {
+			s.Note("Brought in from %s as %s %s. The original folder is left as it was.", src, flavorName(flavor), version)
+		}
 		return nil, nil
 	})
 	return s, job, nil

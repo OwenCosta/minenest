@@ -276,6 +276,15 @@ func (a *api) routes() http.Handler {
 		}
 		return map[string]string{"id": s.ID, "job": j.ID}, nil
 	})
+	h("GET /api/import/find", func(r *http.Request) (any, error) { return a.m.FindServers(r.Context()), nil })
+	h("POST /api/import/zip", func(r *http.Request) (any, error) {
+		q := r.URL.Query()
+		s, j, err := a.m.ImportZip(r.Body, ImportOptions{Name: q.Get("name"), Flavor: q.Get("flavor"), Version: q.Get("version"), ZipName: q.Get("filename")})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"id": s.ID, "job": j.ID}, nil
+	})
 	h("POST /api/import", func(r *http.Request) (any, error) {
 		var o ImportOptions
 		if err := body(r, &o); err != nil {

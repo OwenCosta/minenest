@@ -7,14 +7,19 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = 'OwenCosta/minenest'
-$base = "https://github.com/$repo/releases/latest/download"
+$base = if ($env:MINENEST_RELEASE_URL) { $env:MINENEST_RELEASE_URL } else { "https://github.com/$repo/releases/latest/download" }
+# MINENEST_INSTALL_DIR installs somewhere else and leaves PATH and the Start menu alone (for tests).
+$test = [bool]$env:MINENEST_INSTALL_DIR
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
-$dir = Join-Path $env:LOCALAPPDATA 'Programs\MineNest'
+$dir = if ($test) { $env:MINENEST_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\MineNest' }
 
 Write-Host 'Installing MineNest...'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $sums = @{}
-foreach ($line in (Invoke-WebRequest -UseBasicParsing "$base/SHA256SUMS").Content -split "`n") {
+# GitHub sends release files as application/octet-stream, which PowerShell hands back as bytes.
+$raw = (Invoke-WebRequest -UseBasicParsing "$base/SHA256SUMS").Content
+if ($raw -is [byte[]]) { $raw = [Text.Encoding]::ASCII.GetString($raw) }
+foreach ($line in $raw -split "`n") {
     $f = $line.Trim() -split '\s+'
     if ($f.Count -eq 2) { $sums[$f[1].TrimStart('*')] = $f[0].ToLower() }
 }
@@ -36,6 +41,10 @@ foreach ($pair in @(@("minenest-windows-$arch.exe", 'minenest.exe'), @("minenest
     Move-Item -Force $tmp $dest
 }
 
+try { Invoke-WebRequest -UseBasicParsing "$base/minenest.ico" -OutFile (Join-Path $dir 'minenest.ico') } catch {}
+
+if ($test) { Write-Host "MineNest is installed in $dir (test: PATH and Start menu left alone)."; return }
+
 $path = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (-not ($path -split ';' | Where-Object { $_ -eq $dir })) {
     [Environment]::SetEnvironmentVariable('Path', ($(if ($path) { "$path;" } else { '' }) + $dir), 'User')
@@ -46,6 +55,8 @@ $lnk = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Programs'
 $lnk.TargetPath = Join-Path $dir 'minenest-gui.exe'
 $lnk.WorkingDirectory = $dir
 $lnk.Description = 'MineNest: easy Minecraft servers'
+$ico = Join-Path $dir 'minenest.ico'
+if (Test-Path $ico) { $lnk.IconLocation = "$ico,0" }
 $lnk.Save()
 
 Write-Host "MineNest is installed in $dir."
