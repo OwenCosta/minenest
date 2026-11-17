@@ -1,10 +1,12 @@
 # Installs MineNest for this Windows user (no administrator needed):
-#   irm https://github.com/OwenCosta/minenest/releases/latest/download/install.ps1 | iex
+#   [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm https://github.com/OwenCosta/minenest/releases/latest/download/install.ps1 | iex
 # It puts minenest.exe and minenest-gui.exe in %LOCALAPPDATA%\Programs\MineNest, adds that folder
 # to this user's PATH, makes a Start menu shortcut, and opens MineNest. Each file is checked
 # against the release's SHA256SUMS before it's kept.
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 starts with old TLS versions, which GitHub refuses.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'
 $repo = 'OwenCosta/minenest'
 $base = if ($env:MINENEST_RELEASE_URL) { $env:MINENEST_RELEASE_URL } else { "https://github.com/$repo/releases/latest/download" }

@@ -287,12 +287,24 @@ func javaFor(ctx context.Context, mc string) int {
 // Java, and says how to run it. pin, when set, asks for one build (a modpack's loader version).
 func installFlavor(ctx context.Context, dir, flavor, mc, pin string, job *Job) (*Installed, error) {
 	var err error
+	if (mc == "" || mc == "latest") && os.Getenv("MINENEST_FAKE_INSTALL") != "" {
+		mc = "26.3"
+	}
 	if mc == "" || mc == "latest" {
 		if mc, err = latestVersion(ctx, flavor); err != nil {
 			return nil, err
 		}
 	}
 	inst := &Installed{Flavor: flavor, Minecraft: mc, Launch: []string{"-jar", "server.jar"}}
+	if os.Getenv("MINENEST_FAKE_INSTALL") != "" {
+		// Tests (XenithOS's, with a stand-in server): no downloads, a placeholder server.jar.
+		inst.Java = 21
+		os.MkdirAll(dir, 0o755)
+		if !exists(filepath.Join(dir, "server.jar")) {
+			os.WriteFile(filepath.Join(dir, "server.jar"), []byte("stand-in"), 0o644)
+		}
+		return inst, nil
+	}
 	job.Say("Looking up Minecraft %s", mc)
 	inst.Java = javaFor(ctx, mc)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

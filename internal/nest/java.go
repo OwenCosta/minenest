@@ -32,6 +32,9 @@ func javaArch() string {
 
 // javaPath is the java program for a major version, or "" until it's been downloaded.
 func javaPath(major int) string {
+	if j := os.Getenv("MINENEST_JAVA"); j != "" { // tests: a stand-in for java, nothing downloaded
+		return j
+	}
 	dir := homePath("java", fmt.Sprint(major))
 	entries, err := os.ReadDir(dir)
 	if err != nil {

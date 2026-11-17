@@ -35,7 +35,7 @@ command line.
 **Windows** (10 or 11), in PowerShell:
 
 ```powershell
-irm https://github.com/OwenCosta/minenest/releases/latest/download/install.ps1 | iex
+[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm https://github.com/OwenCosta/minenest/releases/latest/download/install.ps1 | iex
 ```
 
 MineNest goes in your user's programs folder (no administrator needed), gets a Start menu
