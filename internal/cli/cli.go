@@ -20,7 +20,7 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
 
   minenest gui                          open MineNest's window
   minenest list                         your servers
-  minenest create NAME [-t TYPE] [-v VERSION] [-m MEMORY] [--modpack SLUG]
+  minenest create NAME [-t TYPE] [-v VERSION] [-b BUILD] [-m MEMORY] [--modpack SLUG]
                                         make a server (TYPE: paper, vanilla, fabric, neoforge,
                                         forge, purpur; VERSION: latest or e.g. 1.21.4)
   minenest start|stop|restart|kill [SERVER]
@@ -38,8 +38,9 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
   minenest op|deop|kick|ban|pardon|allow|disallow PLAYER [-s SERVER]
   minenest set [-s SERVER] KEY=VALUE... change server.properties (minenest get to see them)
   minenest config [-s SERVER] [ram=4G] [autostart=on] [auto-restart=on] [name=NAME]
-  minenest switch [-s SERVER] TYPE [VERSION]  change the server type or Minecraft version
+  minenest switch [-s SERVER] TYPE [VERSION] [-b BUILD]  change the type, version or build
   minenest versions TYPE                which Minecraft versions a type can run
+  minenest builds TYPE VERSION          its loader versions or builds (choose one with -b)
 
   minenest import FOLDER [--name NAME] [-t TYPE] [-v VERSION]
                                         bring in a server you already have (it's copied)
@@ -82,7 +83,7 @@ type flags struct {
 
 var valueFlags = map[string]string{"-s": "server", "--server": "server", "-t": "type", "--type": "type", "-v": "version",
 	"--version": "version", "-m": "ram", "--memory": "ram", "--ram": "ram", "--modpack": "modpack", "--seed": "seed",
-	"--host": "host", "--user": "user", "--ssh-port": "ssh-port", "--port": "port", "--pin": "pin", "--name": "name", "-n": "lines"}
+	"--host": "host", "-b": "build", "--build": "build", "--loader": "build", "--user": "user", "--ssh-port": "ssh-port", "--port": "port", "--pin": "pin", "--name": "name", "-n": "lines"}
 
 func parse(args []string) flags {
 	f := flags{vals: map[string]string{}, bools: map[string]bool{}}
@@ -350,10 +351,33 @@ func run(args []string) error {
 			v = f.pos[1]
 		}
 		var j jobResp
-		if err := c.post(sp(id)+"/version", map[string]string{"flavor": f.pos[0], "version": v}, &j); err != nil {
+		if err := c.post(sp(id)+"/version", map[string]string{"flavor": f.pos[0], "version": v, "build": f.vals["build"]}, &j); err != nil {
 			return err
 		}
 		return c.wait(j.Job)
+	case "builds", "loaders":
+		if len(f.pos) < 2 {
+			return fmt.Errorf("say the type and Minecraft version: minenest builds fabric 1.21.4")
+		}
+		var bs []nest.Build
+		if err := c.get("/api/builds/"+url.PathEscape(f.pos[0])+"/"+url.PathEscape(f.pos[1]), &bs); err != nil {
+			return err
+		}
+		if len(bs) == 0 {
+			fmt.Println("There's only one: Minecraft's own.")
+		}
+		for i, b := range bs {
+			if i == 25 {
+				fmt.Printf("  ...and %d older\n", len(bs)-25)
+				break
+			}
+			mark := ""
+			if b.Recommended {
+				mark = "  (MineNest's pick)"
+			}
+			fmt.Printf("  %-28s %s%s\n", b.ID, b.Label, mark)
+		}
+		return nil
 	case "versions":
 		if len(f.pos) == 0 {
 			return fmt.Errorf("say which type: paper, vanilla, fabric, neoforge, forge or purpur")
@@ -610,7 +634,7 @@ func create(c *client, f flags) error {
 	if err != nil {
 		return err
 	}
-	o := nest.CreateOptions{Name: name, Flavor: f.vals["type"], Version: f.vals["version"], RAM: ram, Modpack: f.vals["modpack"]}
+	o := nest.CreateOptions{Name: name, Flavor: f.vals["type"], Version: f.vals["version"], RAM: ram, Modpack: f.vals["modpack"], Build: f.vals["build"]}
 	if f.bools["agree-eula"] || f.bools["eula"] {
 		o.AgreeEULA = true
 	}

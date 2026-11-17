@@ -357,7 +357,11 @@ func installFlavor(ctx context.Context, dir, flavor, mc, pin string, job *Job) (
 			Build string
 			MD5   string
 		}
-		if err := getJSON(ctx, fmt.Sprintf("%s/%s/latest", purpurAPI, mc), 10*time.Minute, &info); err != nil {
+		which := "latest"
+		if pin != "" {
+			which = pin
+		}
+		if err := getJSON(ctx, fmt.Sprintf("%s/%s/%s", purpurAPI, mc, which), 10*time.Minute, &info); err != nil {
 			return nil, err
 		}
 		inst.Build = info.Build

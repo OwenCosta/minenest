@@ -249,6 +249,9 @@ func (a *api) routes() http.Handler {
 	h("GET /api/versions/{flavor}", func(r *http.Request) (any, error) {
 		return Versions(r.Context(), r.PathValue("flavor"))
 	})
+	h("GET /api/builds/{flavor}/{mc}", func(r *http.Request) (any, error) {
+		return Builds(r.Context(), r.PathValue("flavor"), r.PathValue("mc"))
+	})
 	h("GET /api/modpacks", func(r *http.Request) (any, error) {
 		off, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 		return SearchModpacks(r.Context(), r.URL.Query().Get("q"), off)
@@ -382,7 +385,11 @@ func (a *api) routes() http.Handler {
 			return nil, s.Command(o.Command)
 		case "repair":
 			c := s.Config()
-			j, err := a.m.ChangeVersion(s, c.Flavor, c.Want)
+			b := ""
+			if c.Installed != nil {
+				b = c.Installed.Build
+			}
+			j, err := a.m.ChangeVersion(s, c.Flavor, c.Want, b)
 			return jobRef(j), err
 		case "recheck":
 			go s.RecheckWay()
@@ -456,12 +463,12 @@ func (a *api) routes() http.Handler {
 		if err != nil {
 			return nil, err
 		}
-		var o struct{ Flavor, Version string }
+		var o struct{ Flavor, Version, Build string }
 		body(r, &o)
 		if o.Version == "" {
 			o.Version = "latest"
 		}
-		j, err := a.m.ChangeVersion(s, o.Flavor, o.Version)
+		j, err := a.m.ChangeVersion(s, o.Flavor, o.Version, o.Build)
 		return jobRef(j), err
 	})
 

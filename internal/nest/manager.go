@@ -166,13 +166,15 @@ func (m *Manager) freePort() int {
 
 // CreateOptions describe a new server.
 type CreateOptions struct {
-	Name      string `json:"name"`
-	Flavor    string `json:"flavor"`
-	Version   string `json:"version"` // "" or "latest" for the newest
-	RAM       int    `json:"ram_mb"`
-	Modpack   string `json:"modpack"` // a Modrinth modpack's id or slug, instead of flavor and version
-	PackVer   string `json:"modpack_version"`
-	AgreeEULA bool   `json:"agree_eula"` // the user ticked the box themselves
+	Name      string            `json:"name"`
+	Flavor    string            `json:"flavor"`
+	Version   string            `json:"version"`  // "" or "latest" for the newest
+	Build     string            `json:"build"`    // a loader version or build (Builds); "" for the recommended one
+	Settings  map[string]string `json:"settings"` // server.properties to start with
+	RAM       int               `json:"ram_mb"`
+	Modpack   string            `json:"modpack"` // a Modrinth modpack's id or slug, instead of flavor and version
+	PackVer   string            `json:"modpack_version"`
+	AgreeEULA bool              `json:"agree_eula"` // the user ticked the box themselves
 }
 
 // Create makes a server and installs its software in a job.
@@ -203,6 +205,11 @@ func (m *Manager) Create(o CreateOptions) (*Server, *Job, error) {
 	p := s.props()
 	p.Set("server-port", fmt.Sprint(port))
 	p.Set("motd", o.Name+" (a MineNest server)")
+	for k, v := range o.Settings {
+		if k != "" && !strings.ContainsAny(k, "=:\n #") && !strings.Contains(v, "\n") {
+			p.Set(k, v)
+		}
+	}
 	p.Save()
 	if o.AgreeEULA {
 		s.AgreeEULA()
@@ -213,7 +220,7 @@ func (m *Manager) Create(o CreateOptions) (*Server, *Job, error) {
 		if o.Modpack != "" {
 			return nil, installModpack(ctx, s, o.Modpack, o.PackVer, j)
 		}
-		inst, err := installFlavor(ctx, s.Root(), o.Flavor, o.Version, "", j)
+		inst, err := installFlavor(ctx, s.Root(), o.Flavor, o.Version, o.Build, j)
 		if err != nil {
 			return nil, err
 		}
@@ -257,7 +264,7 @@ func (m *Manager) Delete(s *Server) error {
 }
 
 // ChangeVersion installs another flavor or version into the same server (its world stays).
-func (m *Manager) ChangeVersion(s *Server, flavor, version string) (*Job, error) {
+func (m *Manager) ChangeVersion(s *Server, flavor, version, build string) (*Job, error) {
 	if _, ok := flavorByID(flavor); !ok {
 		return nil, fmt.Errorf("MineNest doesn't know a server type called %q", flavor)
 	}
@@ -273,7 +280,7 @@ func (m *Manager) ChangeVersion(s *Server, flavor, version string) (*Job, error)
 				return nil, fmt.Errorf("the backup before the change failed, so nothing was changed: %v", err)
 			}
 		}
-		inst, err := installFlavor(ctx, s.Root(), flavor, version, "", j)
+		inst, err := installFlavor(ctx, s.Root(), flavor, version, build, j)
 		if err != nil {
 			return nil, err
 		}

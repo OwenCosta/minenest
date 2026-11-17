@@ -12,7 +12,8 @@
 <div id="app">
   <aside id="side">
     <div class="brand"><img src="icon.svg" alt=""><span>MineNest</span></div>
-    <button class="btn primary wide" id="new-server">+ New server</button>
+    <button class="btn primary" id="new-server">New server</button>
+    <div class="side-label">Servers</div>
     <nav id="server-list"></nav>
     <div class="side-foot">
       <button class="link" id="open-account">Account and supporter relay</button>
@@ -21,22 +22,22 @@
   </aside>
   <main id="main">
     <div id="empty" class="empty hidden">
-      <img src="icon.svg" alt="" class="big-icon">
-      <h1>Welcome to MineNest</h1>
-      <p>Your own Minecraft server in a couple of clicks: Paper, Fabric, Forge, NeoForge or Minecraft's own, with mods and plugins from Modrinth, and a way for friends on the internet to join.</p>
-      <button class="btn primary" id="empty-new">Make your first server</button>
+      <img src="icon.svg" alt="">
+      <h1>No servers yet</h1>
+      <p>Make one and you can be playing on it in a minute or two. Pick Paper for plugins, Fabric, NeoForge or Forge for mods, or a whole modpack.</p>
+      <button class="btn primary big" id="empty-new">Make a server</button>
     </div>
-    <div id="server" class="hidden">
+    <div id="server" class="page hidden">
       <header class="srv-head">
         <div>
           <h1 id="srv-name"></h1>
           <div class="sub" id="srv-sub"></div>
         </div>
         <div class="head-actions">
-          <span class="pill" id="srv-state"></span>
+          <span class="state" id="srv-state"></span>
           <button class="btn primary" id="btn-start">Start</button>
           <button class="btn" id="btn-restart">Restart</button>
-          <button class="btn danger" id="btn-stop">Stop</button>
+          <button class="btn" id="btn-stop">Stop</button>
         </div>
       </header>
       <div class="tabs" id="tabs">
@@ -52,7 +53,7 @@
       <section class="tab hidden" id="tab-console">
         <div id="console" class="console"></div>
         <form id="console-form" class="console-input">
-          <span>&gt;</span><input id="console-cmd" autocomplete="off" placeholder="Type a command, like: say Hello everyone">
+          <input id="console-cmd" autocomplete="off" placeholder="Type a command and press Enter, like: say Hello">
           <button class="btn">Send</button>
         </form>
       </section>
@@ -62,7 +63,8 @@
       <section class="tab hidden" id="tab-world"></section>
       <section class="tab hidden" id="tab-internet"></section>
     </div>
-    <div id="account" class="hidden"></div>
+    <div id="create" class="page hidden"></div>
+    <div id="account" class="page hidden"></div>
   </main>
 </div>
 <div id="jobs"></div>
