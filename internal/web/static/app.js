@@ -31,7 +31,9 @@ async function api(method, path, body, raw) {
     if (raw) opt.body = body;
     else { opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
   }
-  const r = await fetch(path, opt);
+  // Relative, so the dashboard also works from another computer: at home, or under /remote/ on
+  // the website.
+  const r = await fetch(path.replace(/^\//, ""), opt);
   let data = null;
   try { data = await r.json(); } catch (e) {}
   if (!r.ok) throw new Error((data && data.error) || `MineNest answered ${r.status}`);
@@ -661,7 +663,7 @@ async function openAccount() {
   let r;
   try { r = await api("GET", "/api/account"); } catch (e) { fill(el, msg("bad", null, e.message)); return; }
   if (r.signed_in && !r.step) { try { r = await api("POST", "/api/relay/status", {}); } catch (e) { toast(e.message, true); } }
-  const head = h("div", { class: "srv-head" }, h("div", {}, h("h1", {}, "Account"), h("div", { class: "sub" }, "Your OCAccount and the supporter relay")),
+  const head = h("div", { class: "srv-head" }, h("div", {}, h("h1", {}, "Settings and account"), h("div", { class: "sub" }, "Your OCAccount, the supporter relay, other computers and updates")),
     h("button", { class: "link", onclick: () => { S.view = "server"; refresh().then(() => renderTab(true)); } }, "Back to servers"));
   if (!r.signed_in) {
     const n = h("input", { placeholder: "Profile name" }), pin = h("input", { type: "password", inputmode: "numeric" });
@@ -690,6 +692,7 @@ async function openAccount() {
       ocBtn, status,
       h("p", { class: "mt" }, h("button", { class: "link", onclick: () => pinBox.classList.toggle("hidden") }, "Or use a XenithOS profile's name and PIN")),
       pinBox));
+    extraSettings(el);
     return;
   }
   const claimName = h("input", { placeholder: r.suggest || "your-server", value: r.name || "" });
@@ -710,6 +713,71 @@ async function openAccount() {
       h("div", { class: "row mt" },
         h("button", { class: "btn", onclick: () => act(() => api("POST", "/api/relay/status", {}), "Checked.").then(openAccount) }, "Check my membership"),
         r.name ? h("button", { class: "btn danger", onclick: () => confirmDialog("Give up your name?", "It's kept for you for a week in case you change your mind.", "Give it up", () => act(() => api("POST", "/api/relay/release", {}), "Released.").then(openAccount)) }, "Give up the name") : null)));
+  extraSettings(el);
+}
+
+// ------------------------------------------------------------------ updates
+
+async function checkUpdate(now) {
+  let u;
+  try { u = await api("GET", "/api/update" + (now ? "?now=1" : "")); } catch (e) { return null; }
+  fill($("update-note"), u.newer ? msg("good", "New:", `MineNest ${u.latest} is out. `,
+    h("button", { class: "btn primary small", onclick: updateNow }, "Update now")) : null);
+  return u;
+}
+
+async function updateNow() {
+  const r = await act(() => api("POST", "/api/update"));
+  if (!r || !r.job) return;
+  const from = S.info.version;
+  // Once the job is done MineNest stops (saving every server) and the new one starts.
+  for (let i = 0; i < 600; i++) {
+    await new Promise((ok) => setTimeout(ok, 1000));
+    let j = null;
+    try { j = await api("GET", "/api/jobs/" + r.job); } catch (e) {}
+    if (j && j.finished && j.error) return;
+    if (!j || j.finished) break;
+  }
+  document.body.append(h("div", { class: "cover" }, h("h2", {}, "Restarting MineNest"), h("p", { class: "muted" }, "The servers that were running start again by themselves.")));
+  for (let i = 0; i < 180; i++) {
+    await new Promise((ok) => setTimeout(ok, 1500));
+    try { const info = await api("GET", "/api/info"); if (info.version !== from) { location.reload(); return; } } catch (e) {}
+  }
+  location.reload();
+}
+
+// The parts of the Settings page that don't need an account: other computers and updates.
+async function extraSettings(el) {
+  let ri = null;
+  try { ri = await api("GET", "/api/remote"); } catch (e) {}
+  const upd = h("div", {}, h("p", { class: "muted" }, "Checking..."));
+  const showUpd = (u) => fill(upd, !u ? msg("bad", null, "GitHub couldn't be asked just now.") : u.error ? msg("bad", null, u.error)
+    : u.newer ? [msg("good", "New:", `MineNest ${u.latest} is out (this is ${u.current}).`), h("button", { class: "btn primary", onclick: updateNow }, `Update to ${u.latest}`)]
+    : msg("", null, `MineNest ${u.current} is the newest.`));
+  checkUpdate(false).then(showUpd);
+  el.append(section("Updates", "from MineNest's releases on GitHub", upd,
+    h("div", { class: "row mt" }, h("button", { class: "btn", onclick: async () => showUpd(await checkUpdate(true)) }, "Check now"))));
+  if (!ri) {
+    el.append(section("Use MineNest from another computer", null, msg("", null, "These can only be changed on the computer MineNest runs on.")));
+    return;
+  }
+  const pw = h("input", { type: "password", placeholder: ri.has_password ? "Set a new password" : "At least 8 letters", autocomplete: "new-password" });
+  const set = (body, ok) => act(() => api("POST", "/api/remote", body), ok).then((r) => { if (r) openAccount(); });
+  const stateWords = { off: "Off", connecting: "Connecting...", on: "Connected", problem: "Not connected" };
+  el.append(section("Use MineNest from another computer", "everything, the console included",
+    h("h3", {}, "On your home network"),
+    h("p", { class: "muted" }, "Open MineNest in a browser on any computer or phone at home, with a password."),
+    h("div", { class: "form" }, h("label", {}, "Password"), h("div", { class: "row" }, h("div", { class: "grow" }, pw),
+      h("button", { class: "btn", onclick: () => set({ password: pw.value }, "Password saved. Computers at home sign in with it.") }, "Save"))),
+    h("label", { class: "check mt" }, h("input", { type: "checkbox", checked: ri.lan, onchange: (e) => set({ lan: e.target.checked }, e.target.checked ? "On for your home network." : "Off.") }),
+      h("span", {}, "Let computers at home use MineNest")),
+    ri.lan && ri.lan_url ? addrRow("Open it at", ri.lan_url) : null,
+    ri.lan_error ? msg("bad", null, ri.lan_error) : null,
+    h("h3", { class: "mt" }, "From anywhere, through the website"),
+    h("p", { class: "muted" }, "A perk for supporters on Patreon: open ", h("b", {}, ri.web_url), " on any computer, sign in with the same OCAccount, and MineNest is there. Nothing to open on your router."),
+    h("label", { class: "check" }, h("input", { type: "checkbox", checked: ri.web, onchange: (e) => set({ web: e.target.checked }, e.target.checked ? "Connecting to the website." : "Off.") }),
+      h("span", {}, "Let me use MineNest through the website")),
+    ri.web ? msg(ri.web_state === "on" ? "good" : ri.web_state === "problem" ? "bad" : "", stateWords[ri.web_state] || ri.web_state, " ", ri.web_note || (ri.web_state === "on" ? "Open the address above on another computer." : "")) : null));
 }
 
 // ------------------------------------------------------------------ start
@@ -717,6 +785,8 @@ async function openAccount() {
 async function main() {
   try { S.info = await api("GET", "/api/info"); } catch (e) { document.body.textContent = "MineNest isn't answering. Open it again from its icon."; return; }
   $("version").textContent = `MineNest ${S.info.version}`;
+  checkUpdate(false);
+  setInterval(() => checkUpdate(false), 6 * 3600 * 1000);
   for (const j of S.info.jobs) if (!j.finished) watchJob(j.id);
   $("new-server").onclick = openCreate;
   $("empty-new").onclick = openCreate;

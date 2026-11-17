@@ -49,6 +49,7 @@ type DaemonInfo struct {
 
 type api struct {
 	m     *Manager
+	mux   http.Handler
 	token string
 	web   fs.FS
 	quit  chan struct{}
@@ -77,7 +78,10 @@ func Serve(m *Manager, web fs.FS, quit chan struct{}) error {
 	writeJSON(homePath("daemon.json"), DaemonInfo{os.Getpid(), port, Version}, 0o644)
 	defer os.Remove(homePath("daemon.json"))
 	a := &api{m: m, token: tok, web: web, quit: quit}
-	srv := &http.Server{Handler: a.routes(), ReadHeaderTimeout: 10 * time.Second}
+	a.mux = a.routes()
+	m.api = a
+	m.applyRemote() // the home-network door and the website connection, if they're on
+	srv := &http.Server{Handler: a.mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-quit
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -670,6 +674,34 @@ func (a *api) routes() http.Handler {
 			return a.m.UseToken(r.Context(), o.Token)
 		}
 		return a.m.Login(r.Context(), o.Name, o.Pin, o.Create)
+	})
+	h("GET /api/update", func(r *http.Request) (any, error) {
+		return CheckUpdate(r.Context(), r.URL.Query().Get("now") == "1"), nil
+	})
+	h("POST /api/update", func(r *http.Request) (any, error) {
+		j, err := a.m.UpdateAndRestart()
+		return jobRef(j), err
+	})
+	h("GET /api/remote", func(r *http.Request) (any, error) {
+		ri := a.m.RemoteInfo()
+		ri.Here = true
+		return ri, nil
+	})
+	h("POST /api/remote", func(r *http.Request) (any, error) {
+		var o struct {
+			LAN      *bool   `json:"lan"`
+			Web      *bool   `json:"web"`
+			Password *string `json:"password"`
+		}
+		if err := body(r, &o); err != nil {
+			return nil, err
+		}
+		if err := a.m.SetRemote(o.LAN, o.Web, o.Password); err != nil {
+			return nil, err
+		}
+		ri := a.m.RemoteInfo()
+		ri.Here = true
+		return ri, nil
 	})
 	h("POST /api/account/oc/start", func(r *http.Request) (any, error) {
 		u, err := a.m.OCStart(r.Context())

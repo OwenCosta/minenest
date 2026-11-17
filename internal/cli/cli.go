@@ -513,6 +513,12 @@ func daemon() error {
 	err = nest.Serve(m, files, quit)
 	fmt.Printf("%s Stopping every server...\n", time.Now().Format(time.DateTime))
 	m.Shutdown()
+	if exe := m.RestartExe(); exe != "" { // updated: the new MineNest takes over
+		fmt.Printf("%s Starting the updated MineNest\n", time.Now().Format(time.DateTime))
+		if serr := startDaemonExe(exe); serr != nil {
+			fmt.Println("It didn't start:", serr)
+		}
+	}
 	return err
 }
 

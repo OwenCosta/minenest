@@ -86,6 +86,27 @@ which friends type in Minecraft, without playit.gg, a VPS or router changes:
 With Paper or Purpur, players' real addresses come through too, so bans by address work. A
 XenithOS profile's name and PIN still work instead of an OCAccount (`minenest account login --pin`).
 
+## Use it from another computer
+
+On **Settings and account**, two switches, both off until you turn them on:
+
+- **On your home network:** set a password, turn it on, and open the address MineNest shows
+  (like `http://192.168.1.20:47576/`) on any computer or phone at home. Only computers on private
+  networks are let in, and only with the password.
+- **From anywhere, through the website** (a perk for supporters on Patreon): turn it on, then open
+  `https://cloud.owencosta.diy/remote/` anywhere and sign in with the same OCAccount. MineNest keeps
+  a connection out to XenithOS Cloud, which passes your browser's requests to it, so nothing has
+  to be opened on your router.
+
+Either way you get the whole dashboard, console included. Stopping MineNest itself and these
+settings stay on the computer it runs on.
+
+## Updates
+
+When there's a newer MineNest, the sidebar says so: **Update now** downloads it from GitHub,
+checks it against the release's checksums, puts it in place, and restarts MineNest, starting the
+servers that were running again. `minenest update` does the same from a terminal.
+
 ## How it works
 
 `minenest` is a single program. Its background service (`minenest daemon`, started by itself

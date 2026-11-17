@@ -132,6 +132,7 @@ func (m *Manager) Logout(ctx context.Context) {
 		m.cloudPost(ctx, "/v1/accounts/logout", url.Values{"token": {tok}})
 	}
 	m.updateSettings(func(s *Settings) { s.AccountName, s.AccountToken, s.OCAccount = "", "", "" })
+	m.applyRemote()
 }
 
 // ------------------------------------------------------------------ the relay
@@ -419,6 +420,7 @@ func (m *Manager) OCPoll(ctx context.Context) OCState {
 		m.ocSession = ""
 		m.mu.Unlock()
 		m.updateSettings(func(s *Settings) { s.AccountName, s.AccountToken, s.OCAccount = kv["name"], kv["token"], kv["account"] })
+		m.applyRemote()
 		return OCState{State: "done", Name: kv["name"], Account: kv["account"]}
 	case "error":
 		m.mu.Lock()

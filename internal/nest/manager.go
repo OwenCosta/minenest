@@ -20,7 +20,9 @@ type Settings struct {
 	AccountToken string `json:"account_token"` // its token (the file is readable by this user only)
 	OCAccount    string `json:"oc_account"`    // the OCAccount it was signed in with, if any
 	APIPort      int    `json:"api_port"`
-	LANAccess    bool   `json:"lan_access"` // the GUI can be opened from other computers at home (with the key)
+	LANAccess    bool   `json:"lan_access"`   // the dashboard on the home network (remote.go)
+	LANPassword  string `json:"lan_password"` // its password, hashed
+	WebRemote    bool   `json:"web_remote"`   // the dashboard through the website, for supporters
 }
 
 // Manager is the daemon's state: every server, the jobs, the account and the shared ways in.
@@ -33,10 +35,13 @@ type Manager struct {
 	relay    *relayState
 
 	ocSession, ocKey string // an OCAccount sign-in waiting for the browser
+	api              *api
+	remote           *remoteState
+	restartExe       string // after an update: the new MineNest to start once this one stops
 }
 
 func NewManager() (*Manager, error) {
-	m := &Manager{servers: map[string]*Server{}}
+	m := &Manager{servers: map[string]*Server{}, remote: &remoteState{sessions: map[string]time.Time{}, tries: map[string][]time.Time{}}}
 	if err := os.MkdirAll(homePath("servers"), 0o755); err != nil {
 		return nil, err
 	}
@@ -81,8 +86,9 @@ func (m *Manager) updateSettings(f func(s *Settings)) error {
 
 // Autostart starts the servers marked to start with MineNest.
 func (m *Manager) Autostart() {
+	m.resumeServers()
 	for _, s := range m.List() {
-		if s.Config().Autostart {
+		if s.Config().Autostart && s.State() == Stopped {
 			if err := s.Start(); err != nil {
 				s.Note("It didn't start with MineNest: %v", err)
 			}
