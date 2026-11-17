@@ -751,7 +751,7 @@ async function extraSettings(el) {
   let ri = null;
   try { ri = await api("GET", "/api/remote"); } catch (e) {}
   const upd = h("div", {}, h("p", { class: "muted" }, "Checking..."));
-  const showUpd = (u) => fill(upd, !u ? msg("bad", null, "GitHub couldn't be asked just now.") : u.error ? msg("bad", null, u.error)
+  const showUpd = (u) => fill(upd, !u ? msg("bad", null, "GitHub couldn't be asked just now.") : u.managed ? msg("", null, u.managed) : u.error ? msg("bad", null, u.error)
     : u.newer ? [msg("good", "New:", `MineNest ${u.latest} is out (this is ${u.current}).`), h("button", { class: "btn primary", onclick: updateNow }, `Update to ${u.latest}`)]
     : msg("", null, `MineNest ${u.current} is the newest.`));
   checkUpdate(false).then(showUpd);

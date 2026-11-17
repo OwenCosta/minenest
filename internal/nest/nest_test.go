@@ -486,3 +486,25 @@ func TestOCSignIn(t *testing.T) {
 		t.Fatal("finished sign-ins are forgotten", st)
 	}
 }
+
+// A "<program>.managed" file beside MineNest leaves its updates to whatever wrote it (XenithOS).
+func TestManagedUpdates(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skip(err)
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	if err := os.WriteFile(exe+".managed", []byte("XenithOS keeps MineNest up to date.\n"), 0o644); err != nil {
+		t.Skip(err)
+	}
+	defer os.Remove(exe + ".managed")
+	u := CheckUpdate(t.Context(), true)
+	if u.Managed != "XenithOS keeps MineNest up to date." || u.Newer {
+		t.Fatal(u)
+	}
+	if _, err := ApplyUpdate(t.Context(), nil); err == nil || !strings.Contains(err.Error(), "XenithOS") {
+		t.Fatal(err)
+	}
+}

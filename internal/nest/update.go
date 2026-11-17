@@ -17,6 +17,7 @@ import (
 // `minenest update`, do it.
 
 type UpdateInfo struct {
+	Managed string `json:"managed,omitempty"` // something else keeps MineNest up to date (managedBy)
 	Current string `json:"current"`
 	Latest  string `json:"latest"`
 	Newer   bool   `json:"newer"`
@@ -60,6 +61,27 @@ func latestRelease(ctx context.Context) (*ghRelease, error) {
 	return &rel, nil
 }
 
+// managedBy is what keeps this MineNest up to date when that isn't MineNest itself: a file
+// "<program>.managed" beside it says so (XenithOS's get-minenest.sh writes one; XenithOS pins the
+// version it installs). Then neither the Update button nor `minenest update` changes the program.
+func managedBy() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	b, err := os.ReadFile(exe + ".managed")
+	if err != nil {
+		return ""
+	}
+	if s := strings.TrimSpace(string(b)); s != "" {
+		return s
+	}
+	return "Something else keeps this MineNest up to date."
+}
+
 // CheckUpdate says whether there's a newer MineNest (asked at most every few hours, unless now).
 func CheckUpdate(ctx context.Context, now bool) UpdateInfo {
 	updMu.Lock()
@@ -70,6 +92,10 @@ func CheckUpdate(ctx context.Context, now bool) UpdateInfo {
 	}
 	updMu.Unlock()
 	u := UpdateInfo{Current: Version}
+	if m := managedBy(); m != "" {
+		u.Managed = m
+		return u
+	}
 	if rel, err := latestRelease(ctx); err != nil {
 		u.Error = err.Error()
 	} else {
@@ -85,6 +111,9 @@ func CheckUpdate(ctx context.Context, now bool) UpdateInfo {
 // ApplyUpdate downloads the newest release for this computer and puts it in place. It returns the
 // program to start again (the path this one had).
 func ApplyUpdate(ctx context.Context, job *Job) (string, error) {
+	if m := managedBy(); m != "" {
+		return "", fmt.Errorf("%s", m)
+	}
 	rel, err := latestRelease(ctx)
 	if err != nil {
 		return "", err

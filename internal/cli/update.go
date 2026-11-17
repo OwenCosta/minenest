@@ -14,6 +14,10 @@ import (
 // (and starts again, with the servers that were running); otherwise it's done here.
 func selfUpdate(checkOnly bool) error {
 	u := nest.CheckUpdate(context.Background(), true)
+	if u.Managed != "" {
+		fmt.Println(u.Managed)
+		return nil
+	}
 	if u.Error != "" {
 		return fmt.Errorf("%s", u.Error)
 	}
