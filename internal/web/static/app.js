@@ -107,6 +107,7 @@ function renderSide() {
       h("div", { class: "s" }, s.installed ? `${s.flavor_name} ${s.minecraft}` : s.busy ? "Setting up" : "Not installed"))));
 }
 function pickServer(id) {
+  S.vpsOpen = false;
   S.cur = id; S.view = "server"; localStorage.setItem("mn-cur", id);
   S.seq = 0; S.consoleFor = null; $("console").replaceChildren();
   refresh().then(() => renderTab(true));
@@ -427,14 +428,18 @@ async function tabInternet(s, full) {
   ];
   if (full && (way.kind === "vps" || S.vpsOpen)) {
     if (!vpsKey) { try { vpsKey = (await api("GET", "/api/sshkey")).key; } catch (e) {} }
-    const host = h("input", { placeholder: "203.0.113.7 or vps.example.com" }), user = h("input", { value: "root" });
-    const sshp = h("input", { type: "number", value: 22 }), port = h("input", { type: "number", value: 25565 });
+    const v = s.vps || {};
+    const host = h("input", { placeholder: "203.0.113.7 or vps.example.com", value: v.host || "" }), user = h("input", { value: v.user || "root" });
+    const sshp = h("input", { type: "number", value: v.ssh_port || 22 }), port = h("input", { type: "number", value: v.public_port || 25565 });
     fill($("net-extra"), section("Your VPS", null,
       h("p", {}, "1. Put this line in ~/.ssh/authorized_keys for that user on the VPS:"), h("div", { class: "addr" }, h("span", { class: "lbl" }, "MineNest's key"), h("code", { style: "font-size:11.5px" }, vpsKey), copyBtn(vpsKey)),
       h("p", {}, "2. In /etc/ssh/sshd_config set ", h("code", {}, "GatewayPorts clientspecified"), ", restart sshd, and open the players' port in its firewall."),
       h("p", {}, "3. Its details:"),
       h("div", { class: "form" }, h("label", {}, "Address"), host, h("label", {}, "User"), user, h("label", {}, "SSH port"), sshp, h("label", {}, "Port for players"), port),
-      h("div", { class: "row mt" }, h("button", { class: "btn primary", onclick: () => act(() => api("POST", sp("/way"), { kind: "vps", vps: { host: host.value.trim(), user: user.value.trim(), ssh_port: +sshp.value, public_port: +port.value } }), "Your VPS is the way in now.").then((ok) => { if (ok) S.vpsOpen = false; }) }, "Use this VPS"))));
+      h("div", { class: "row mt" }, h("button", { class: "btn primary", onclick: async () => {
+        const ok = await act(() => api("POST", sp("/way"), { kind: "vps", vps: { host: host.value.trim(), user: user.value.trim(), ssh_port: +sshp.value, public_port: +port.value } }), "Your VPS is the way in now.");
+        if (ok) { S.vpsOpen = false; await refresh(); tabInternet(S.status, true); }
+      } }, way.kind === "vps" ? "Save these details" : "Switch to this VPS"))));
   } else if (full) fill($("net-extra"));
   if (full || !$("net-bedrock").contains(document.activeElement)) {
     fill($("net-bedrock"), ["paper", "purpur"].includes(s.flavor) ? section("Bedrock players", "phones, consoles, Windows",
@@ -454,10 +459,18 @@ async function tabInternet(s, full) {
       way.kind === "vps" ? h("button", { class: "btn", onclick: () => act(() => api("POST", sp("/way/forget-host")), "MineNest will trust the VPS's identity next time.") }, "Trust its new identity") : null)) : null;
   fill($("net-top"),
     section("How friends elsewhere join", null,
-      h("div", { class: "types" }, kinds.map(([k, name, about]) => h("button", { class: "type" + ((way.kind || "") === k ? " on" : ""), onclick: () => {
-        if (k === "vps") { S.vpsOpen = true; tabInternet(S.status, true); return; }
+      h("div", { class: "types" }, kinds.map(([k, name, about]) => h("button", { class: "type" + ((S.vpsOpen ? "vps" : (way.kind || "")) === k ? " on" : ""), onclick: () => {
+        if (k !== "vps") S.vpsOpen = false;
+        if (k === "vps") {
+          S.vpsOpen = true;
+          // One that's set up already: switch to it now (its details stay open to change).
+          if (s.vps && s.vps.host && way.kind !== "vps") { act(() => api("POST", sp("/way"), { kind: "vps" }), "Your VPS is the way in now.").then(() => refresh()).then(() => tabInternet(S.status, true)); return; }
+          tabInternet(S.status, true);
+          toast("Fill in your VPS's details below, then choose Switch to this VPS.");
+          return;
+        }
         if (k === "relay" && !S.info.account) { openAccount(); toast("Sign in with your OCAccount first.", true); return; }
-        act(() => api("POST", sp("/way"), { kind: k }), k ? `${name} is the way in now.` : "Only people at home can join now.");
+        act(() => api("POST", sp("/way"), { kind: k }), k ? `${name} is the way in now.` : "Only people at home can join now.").then(() => refresh()).then(() => tabInternet(S.status, true));
       } }, h("span", { class: "radio" }), h("b", {}, name), h("span", {}, about)))),
       way.kind === "relay" && ["paper", "purpur"].includes(s.flavor) ? h("label", { class: "check mt" }, h("input", { type: "checkbox", checked: s.real_ips, onchange: (e) => act(() => api("PATCH", sp(), { real_ips: e.target.checked }), "Saved. It counts from the next start.") }),
         h("span", {}, "Pass on players' real addresses", h("div", { class: "h" }, "So bans by address work through the relay. Not with Bedrock players on."))) : null),

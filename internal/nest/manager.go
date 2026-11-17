@@ -345,37 +345,38 @@ type Addresses struct {
 }
 
 type ServerStatus struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Flavor         string    `json:"flavor"`
-	FlavorName     string    `json:"flavor_name"`
-	Minecraft      string    `json:"minecraft"`
-	Build          string    `json:"build"`
-	Java           int       `json:"java"`
-	Installed      bool      `json:"installed"`
-	State          string    `json:"state"`
-	Busy           string    `json:"busy,omitempty"`
-	Uptime         int64     `json:"uptime"`
-	Players        []string  `json:"players"`
-	MaxPlayers     int       `json:"max_players"`
-	Port           int       `json:"port"`
-	RAM            int       `json:"ram_mb"`
-	EulaNeeded     bool      `json:"eula_needed"`
-	Why            string    `json:"why,omitempty"`
-	Addresses      Addresses `json:"addresses"`
-	Way            WayStatus `json:"way"`
-	Bedrock        bool      `json:"bedrock"`
-	BedrockOn      bool      `json:"bedrock_on"`
-	Autostart      bool      `json:"autostart"`
-	AutoRestart    bool      `json:"auto_restart"`
-	RealIPs        bool      `json:"real_ips"`
-	AddonKind      string    `json:"addon_kind"`
-	Modpack        string    `json:"modpack,omitempty"`
-	JVMArgs        string    `json:"jvm_args"`
-	Folder         string    `json:"folder"`
-	LastSeq        int64     `json:"last_seq"`
-	WhitelistOn    bool      `json:"whitelist_on"`
-	WhitelistCount int       `json:"whitelist_count"`
+	ID             string       `json:"id"`
+	Name           string       `json:"name"`
+	Flavor         string       `json:"flavor"`
+	FlavorName     string       `json:"flavor_name"`
+	Minecraft      string       `json:"minecraft"`
+	Build          string       `json:"build"`
+	Java           int          `json:"java"`
+	Installed      bool         `json:"installed"`
+	State          string       `json:"state"`
+	Busy           string       `json:"busy,omitempty"`
+	Uptime         int64        `json:"uptime"`
+	Players        []string     `json:"players"`
+	MaxPlayers     int          `json:"max_players"`
+	Port           int          `json:"port"`
+	RAM            int          `json:"ram_mb"`
+	EulaNeeded     bool         `json:"eula_needed"`
+	Why            string       `json:"why,omitempty"`
+	Addresses      Addresses    `json:"addresses"`
+	Way            WayStatus    `json:"way"`
+	Bedrock        bool         `json:"bedrock"`
+	BedrockOn      bool         `json:"bedrock_on"`
+	Autostart      bool         `json:"autostart"`
+	AutoRestart    bool         `json:"auto_restart"`
+	RealIPs        bool         `json:"real_ips"`
+	AddonKind      string       `json:"addon_kind"`
+	Modpack        string       `json:"modpack,omitempty"`
+	JVMArgs        string       `json:"jvm_args"`
+	Folder         string       `json:"folder"`
+	LastSeq        int64        `json:"last_seq"`
+	VPS            TunnelConfig `json:"vps"` // the VPS set up, if any (its key stays in tunnel/)
+	WhitelistOn    bool         `json:"whitelist_on"`
+	WhitelistCount int          `json:"whitelist_count"`
 }
 
 func (m *Manager) Status(s *Server) ServerStatus {
@@ -418,6 +419,7 @@ func (m *Manager) Status(s *Server) ServerStatus {
 		}
 	}
 	st.BedrockOn = cfg.Bedrock && geyserInstalled(s)
+	st.VPS = cfg.VPS.Tunnel
 	st.Way = WayStatus{Kind: cfg.Way}
 	if w != nil {
 		st.Way = w.status()
