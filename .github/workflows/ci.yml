@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Builds for every platform
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          for t in windows/amd64 windows/arm64 linux/amd64 linux/arm64; do
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/minenest
+          done
+          GOOS=windows CGO_ENABLED=0 go build -ldflags "-H windowsgui" -o /dev/null ./cmd/minenest-gui
+      - name: JavaScript parses
+        if: matrix.os == 'ubuntu-latest'
+        run: node --check internal/web/static/app.js

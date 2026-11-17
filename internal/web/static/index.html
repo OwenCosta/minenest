@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MineNest</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="brand"><img src="icon.svg" alt=""><span>MineNest</span></div>
+    <button class="btn primary wide" id="new-server">+ New server</button>
+    <nav id="server-list"></nav>
+    <div class="side-foot">
+      <button class="link" id="open-account">Account and supporter relay</button>
+      <div class="ver" id="version"></div>
+    </div>
+  </aside>
+  <main id="main">
+    <div id="empty" class="empty hidden">
+      <img src="icon.svg" alt="" class="big-icon">
+      <h1>Welcome to MineNest</h1>
+      <p>Your own Minecraft server in a couple of clicks: Paper, Fabric, Forge, NeoForge or Minecraft's own, with mods and plugins from Modrinth, and a way for friends on the internet to join.</p>
+      <button class="btn primary" id="empty-new">Make your first server</button>
+    </div>
+    <div id="server" class="hidden">
+      <header class="srv-head">
+        <div>
+          <h1 id="srv-name"></h1>
+          <div class="sub" id="srv-sub"></div>
+        </div>
+        <div class="head-actions">
+          <span class="pill" id="srv-state"></span>
+          <button class="btn primary" id="btn-start">Start</button>
+          <button class="btn" id="btn-restart">Restart</button>
+          <button class="btn danger" id="btn-stop">Stop</button>
+        </div>
+      </header>
+      <div class="tabs" id="tabs">
+        <button data-tab="overview" class="on">Overview</button>
+        <button data-tab="console">Console</button>
+        <button data-tab="addons" id="tab-addons-btn">Mods</button>
+        <button data-tab="players">Players</button>
+        <button data-tab="settings">Settings</button>
+        <button data-tab="world">World</button>
+        <button data-tab="internet">Internet</button>
+      </div>
+      <section class="tab" id="tab-overview"></section>
+      <section class="tab hidden" id="tab-console">
+        <div id="console" class="console"></div>
+        <form id="console-form" class="console-input">
+          <span>&gt;</span><input id="console-cmd" autocomplete="off" placeholder="Type a command, like: say Hello everyone">
+          <button class="btn">Send</button>
+        </form>
+      </section>
+      <section class="tab hidden" id="tab-addons"></section>
+      <section class="tab hidden" id="tab-players"></section>
+      <section class="tab hidden" id="tab-settings"></section>
+      <section class="tab hidden" id="tab-world"></section>
+      <section class="tab hidden" id="tab-internet"></section>
+    </div>
+    <div id="account" class="hidden"></div>
+  </main>
+</div>
+<div id="jobs"></div>
+<div id="toasts"></div>
+<div id="modal" class="modal hidden"><div class="modal-box" id="modal-box"></div></div>
+</body>
+</html>
