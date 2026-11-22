@@ -20,7 +20,8 @@ command line.
 - **Friends on the internet:** playit.gg (free, no router changes), your own VPS (an SSH
   tunnel), or the **supporter relay**: supporters on Patreon get their own address, like
   `brave-otter.mc.owencosta.diy`, with nothing to set up. Each way is checked from outside, so you
-  know friends can really get in.
+  know friends can really get in. If playit.gg's agent has trouble, the Internet page shows what
+  it said last, what to do, and a **Try again** button (`minenest internet retry`).
 - **Bedrock players** (phones, consoles, Windows) through GeyserMC's Geyser and Floodgate.
 - **Players, settings, worlds:** whitelist, operators, bans, kicks; every server.properties
   setting with friendly names; backups that work while the server runs; put one back or start a

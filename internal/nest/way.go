@@ -15,15 +15,19 @@ import (
 // always join directly.
 
 type WayStatus struct {
-	Kind     string `json:"kind"`  // "", playit, vps, relay
-	State    string `json:"state"` // off, waiting, connecting, up, retrying, problem
-	Up       bool   `json:"up"`
-	Address  string `json:"address,omitempty"`
-	Note     string `json:"note,omitempty"`
-	Check    string `json:"check,omitempty"` // what the check from outside found
-	CheckOK  bool   `json:"check_ok"`
-	ClaimURL string `json:"claim_url,omitempty"` // playit.gg: the link to approve this computer
-	Bedrock  string `json:"bedrock,omitempty"`   // playit.gg's Bedrock address, if any
+	Kind     string   `json:"kind"`  // "", playit, vps, relay
+	State    string   `json:"state"` // off, waiting, connecting, up, retrying, problem
+	Up       bool     `json:"up"`
+	Address  string   `json:"address,omitempty"`
+	Note     string   `json:"note,omitempty"`
+	Check    string   `json:"check,omitempty"` // what the check from outside found
+	CheckOK  bool     `json:"check_ok"`
+	ClaimURL string   `json:"claim_url,omitempty"` // playit.gg: the link to approve this computer
+	Bedrock  string   `json:"bedrock,omitempty"`   // playit.gg's Bedrock address, if any
+	Agent    string   `json:"agent,omitempty"`     // playit.gg: its agent is stopped, running or connected
+	Fix      string   `json:"fix,omitempty"`       // what to do about the problem in Note
+	Log      []string `json:"log,omitempty"`       // playit.gg: the agent's last lines, when something's wrong
+	CanRetry bool     `json:"can_retry,omitempty"` // playit.gg: Try again starts the agent afresh
 }
 
 type way interface {

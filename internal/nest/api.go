@@ -664,6 +664,10 @@ func (a *api) routes() http.Handler {
 		a.m.ForgetPlayit()
 		return nil, nil
 	})
+	h("POST /api/playit/restart", func(r *http.Request) (any, error) {
+		a.m.RestartPlayit()
+		return nil, nil
+	})
 
 	// The account and the supporter relay
 	h("GET /api/account", func(r *http.Request) (any, error) { return a.m.RelayInfo(), nil })

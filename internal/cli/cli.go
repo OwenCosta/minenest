@@ -51,6 +51,7 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
   minenest new-world [-s SERVER] [--seed SEED]
 
   minenest internet [-s SERVER] off|playit|relay
+  minenest internet retry               start playit.gg's agent again after a problem
   minenest internet [-s SERVER] vps --host HOST --user USER [--ssh-port 22] [--port 25565]
   minenest bedrock [-s SERVER] on|off|update   Bedrock players through Geyser (Paper)
   minenest sshkey                       MineNest's key, for a VPS's authorized_keys
@@ -620,9 +621,15 @@ func status(c *client, ref string) error {
 	if s.Way.ClaimURL != "" {
 		fmt.Printf("  %-14s open %s to connect this computer to your playit.gg account\n", "", s.Way.ClaimURL)
 	}
-	for _, n := range []string{s.Way.Note, s.Way.Check} {
+	for _, n := range []string{s.Way.Note, s.Way.Fix, s.Way.Check} {
 		if n != "" {
 			fmt.Printf("  %-14s %s\n", "", n)
+		}
+	}
+	if len(s.Way.Log) > 0 && !s.Way.Up {
+		fmt.Printf("  %-14s %s\n", "", "What playit.gg's agent said last:")
+		for _, l := range s.Way.Log {
+			fmt.Printf("  %-14s   %s\n", "", l)
 		}
 	}
 	if s.BedrockOn {
@@ -916,6 +923,13 @@ func internet(c *client, f flags) error {
 		return status(c, id)
 	}
 	kind := f.pos[0]
+	if kind == "retry" {
+		if err := c.post("/api/playit/restart", nil, nil); err != nil {
+			return err
+		}
+		fmt.Println("playit.gg's agent starts again. 'minenest status' shows how it's going.")
+		return nil
+	}
 	body := map[string]any{"kind": kind}
 	if kind == "vps" && f.vals["host"] != "" {
 		sshPort, _ := strconv.Atoi(f.vals["ssh-port"])
