@@ -106,3 +106,16 @@ func processAlive(pid int) bool {
 	}
 	return code == 259 // STILL_ACTIVE
 }
+
+// diskFree is how many bytes this user can still write on the disk that holds dir.
+func diskFree(dir string) (int64, error) {
+	p, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return 0, err
+	}
+	var free, total, all uint64
+	if err := windows.GetDiskFreeSpaceEx(p, &free, &total, &all); err != nil {
+		return 0, err
+	}
+	return int64(free), nil
+}

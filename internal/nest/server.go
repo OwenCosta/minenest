@@ -43,6 +43,7 @@ type Config struct {
 	RealIPs      bool       `json:"real_ips"` // players' real addresses through the relay (Paper)
 	Modpack      string     `json:"modpack,omitempty"`
 	ImportedFrom string     `json:"imported_from,omitempty"`
+	AutoBackup   AutoBackup `json:"auto_backup"`
 	Created      time.Time  `json:"created"`
 }
 
@@ -69,7 +70,8 @@ type Server struct {
 	lines    []Line
 	seq      int64
 	players  map[string]time.Time
-	why      string // why it stopped by itself last time
+	lastJoin time.Time // when someone last joined (automatic backups skip a world nobody played)
+	why      string    // why it stopped by itself last time
 	stopAsk  bool
 	restarts []time.Time
 	saved    chan struct{}
@@ -212,6 +214,7 @@ func (s *Server) read(r io.Reader, cmd *exec.Cmd) {
 		}
 		if m := joinRe.FindStringSubmatch(text); m != nil {
 			s.players[m[1]] = time.Now()
+			s.lastJoin = time.Now()
 			kind = "join"
 		} else if m := leftRe.FindStringSubmatch(text); m != nil {
 			delete(s.players, m[1])
@@ -540,7 +543,7 @@ func (s *Server) saveAll(ctx context.Context, flush bool) error {
 	select {
 	case <-ch:
 		return nil
-	case <-time.After(60 * time.Second):
+	case <-time.After(saveWait):
 		return fmt.Errorf("the server didn't say it had saved within a minute")
 	case <-ctx.Done():
 		return ctx.Err()

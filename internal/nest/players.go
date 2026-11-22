@@ -68,6 +68,7 @@ var (
 		"fallow":    {regexp.MustCompile(`(?i)(?:added|whitelisted)`), regexp.MustCompile(`(?i)already`)},
 		"fdisallow": {regexp.MustCompile(`(?i)removed`), regexp.MustCompile(`(?i)(?:isn't|is not|wasn't|was not)`)},
 		"reload":    {regexp.MustCompile(`(?i)Reloaded the whitelist`), nil},
+		"save-on":   {regexp.MustCompile(`(?i)Automatic saving is now enabled|Saving is (?:now )?(?:turned |switched )?on`), regexp.MustCompile(`(?i)Saving is already (?:turned )?on`)},
 	}
 	replyNoBedrock = regexp.MustCompile(`(?i)not found|could not find|couldn't find|does not exist|doesn't exist`)
 	// The pauses between tries when the server's own lookup fails.

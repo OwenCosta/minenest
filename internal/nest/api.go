@@ -513,7 +513,36 @@ func (a *api) routes() http.Handler {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"backups": s.Backups(), "world": s.WorldExists()}, nil
+		used, free := s.BackupSpace()
+		return map[string]any{"backups": s.Backups(), "world": s.WorldExists(), "auto": a.m.AutoStatus(s), "used": used, "free": free}, nil
+	})
+	h("PUT /api/servers/{id}/backups/auto", func(r *http.Request) (any, error) {
+		s, err := a.server(r)
+		if err != nil {
+			return nil, err
+		}
+		var o AutoBackup
+		if err := body(r, &o); err != nil {
+			return nil, err
+		}
+		st, err := a.m.SetAutoBackup(s, o)
+		if err != nil {
+			return nil, bad("%v", err)
+		}
+		return st, nil
+	})
+	h("POST /api/servers/{id}/backups/{name}/keep", func(r *http.Request) (any, error) {
+		s, err := a.server(r)
+		if err != nil {
+			return nil, err
+		}
+		o := struct {
+			Keep *bool `json:"keep"`
+		}{}
+		if err := body(r, &o); err != nil {
+			return nil, err
+		}
+		return nil, s.KeepBackup(r.PathValue("name"), o.Keep == nil || *o.Keep)
 	})
 	h("POST /api/servers/{id}/backups", func(r *http.Request) (any, error) {
 		s, err := a.server(r)

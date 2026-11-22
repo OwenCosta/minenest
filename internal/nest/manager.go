@@ -33,6 +33,7 @@ type Manager struct {
 	Jobs     jobList
 	playit   *playitAgent
 	relay    *relayState
+	auto     *autoSched
 
 	ocSession, ocKey string // an OCAccount sign-in waiting for the browser
 	api              *api
@@ -41,7 +42,7 @@ type Manager struct {
 }
 
 func NewManager() (*Manager, error) {
-	m := &Manager{servers: map[string]*Server{}, remote: &remoteState{sessions: map[string]time.Time{}, tries: map[string][]time.Time{}}}
+	m := &Manager{auto: newAutoSched(), servers: map[string]*Server{}, remote: &remoteState{sessions: map[string]time.Time{}, tries: map[string][]time.Time{}}}
 	if err := os.MkdirAll(homePath("servers"), 0o755); err != nil {
 		return nil, err
 	}
@@ -66,6 +67,7 @@ func NewManager() (*Manager, error) {
 		if err := s.load(); err != nil {
 			continue
 		}
+		s.recoverBackup()
 		m.servers[s.ID] = s
 	}
 	return m, nil
@@ -84,9 +86,10 @@ func (m *Manager) updateSettings(f func(s *Settings)) error {
 	return writeJSON(homePath("minenest.json"), m.settings, 0o600)
 }
 
-// Autostart starts the servers marked to start with MineNest.
+// Autostart starts the servers marked to start with MineNest, and the automatic backups.
 func (m *Manager) Autostart() {
 	m.resumeServers()
+	go m.autoLoop()
 	for _, s := range m.List() {
 		if s.Config().Autostart && s.State() == Stopped {
 			if err := s.Start(); err != nil {

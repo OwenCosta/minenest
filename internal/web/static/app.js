@@ -417,19 +417,54 @@ async function tabWorld(s, full) {
   let r;
   try { r = await api("GET", sp("/backups")); } catch (e) { fill(el, msg("bad", null, e.message)); return; }
   const seed = h("input", { placeholder: "Empty for a random one" });
-  const size = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+  const size = (n) => (n >= 1073741824 ? (n / 1073741824).toFixed(1) + " GB" : n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+  const when = (t) => new Date(t * 1000).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const again = () => tabWorld(S.status, true);
   fill(el,
+    autoBackupSection(r.auto, when, again),
     section("Backups", "MineNest also makes one before anything that could hurt the world",
       h("div", { class: "row" }, h("button", { class: "btn primary", disabled: !r.world, onclick: () => act(() => api("POST", sp("/backups"))) }, "Back up now"),
         !r.world ? h("span", { class: "muted" }, "There's no world yet: start the server once.") : null),
+      h("p", { class: "muted small" }, `${r.backups.length ? `Backups use ${size(r.used)}.` : ""}${r.free >= 0 ? ` ${size(r.free)} is free on this disk.` : ""}`.trim()),
       h("div", { class: "mt" }, r.backups.length ? r.backups.map((b) => h("div", { class: "list-row" },
-        h("div", { class: "grow" }, h("b", {}, new Date(b.time * 1000).toLocaleString()), h("span", { class: "muted" }, `  ${size(b.size)}, ${b.why}`)),
+        h("div", { class: "grow" }, h("b", {}, new Date(b.time * 1000).toLocaleString()), h("span", { class: "muted" }, `  ${size(b.size)}, ${b.why}${b.keep ? ", kept" : ""}`)),
+        b.why !== "Made by hand" ? h("button", { class: "btn small", title: b.keep ? "MineNest may delete it again when it's among the oldest" : "MineNest never deletes a kept backup by itself", onclick: () => act(() => api("POST", sp(`/backups/${encodeURIComponent(b.name)}/keep`), { keep: !b.keep }), b.keep ? "It's no longer kept." : "Kept. MineNest won't delete it.").then(again) }, b.keep ? "Don't keep" : "Keep") : null,
         h("button", { class: "btn small", disabled: s.state !== "stopped", onclick: () => confirmDialog("Put this backup back?", "The world as it is now is backed up first, so nothing is lost.", "Put it back", () => act(() => api("POST", sp(`/backups/${encodeURIComponent(b.name)}/restore`)))) }, "Put back"),
-        h("button", { class: "btn small danger", onclick: () => confirmDialog("Delete this backup?", "It can't be brought back.", "Delete", () => act(() => api("DELETE", sp(`/backups/${encodeURIComponent(b.name)}`)), "Deleted.").then(() => tabWorld(S.status, true))) }, "Delete"))) : h("p", { class: "muted" }, "No backups yet."))),
+        h("button", { class: "btn small danger", onclick: () => confirmDialog("Delete this backup?", "It can't be brought back.", "Delete", () => act(() => api("DELETE", sp(`/backups/${encodeURIComponent(b.name)}`)), "Deleted.").then(again)) }, "Delete"))) : h("p", { class: "muted" }, "No backups yet."))),
     section("A new world", "the old one is backed up, then removed",
       h("div", { class: "form" }, h("label", {}, "Seed"), seed),
       h("div", { class: "row mt" }, h("button", { class: "btn danger", disabled: s.state !== "stopped", onclick: () => confirmDialog("Make a new world?", "The current world is backed up first. The next start makes the new one.", "New world", () => act(() => api("POST", sp("/world/reset"), { seed: seed.value }))) }, "Make a new world"),
         s.state !== "stopped" ? h("span", { class: "muted" }, "Stop the server first.") : null)));
+}
+
+// The schedule for automatic backups, and how it's going.
+function autoBackupSection(a, when, again) {
+  const every = h("select", {}, [["", "Off"], ["hours", "Every few hours"], ["day", "Once a day"]].map(([v, t]) => h("option", { value: v, selected: a.every === v }, t)));
+  const hours = h("input", { type: "number", min: 1, max: 168, value: a.hours || 6 });
+  const time = h("input", { type: "time", value: a.at || "03:30" });
+  const keep = h("input", { type: "number", min: 1, max: 1000, value: a.keep });
+  const hoursRow = [h("label", {}, "Every"), h("div", { class: "row" }, h("div", { style: "width:90px" }, hours), h("span", { class: "muted" }, "hours"))];
+  const timeRow = [h("label", {}, "At"), h("div", { style: "width:130px" }, time)];
+  const show = () => {
+    for (const e of hoursRow) e.classList.toggle("hidden", every.value !== "hours");
+    for (const e of timeRow) e.classList.toggle("hidden", every.value !== "day");
+  };
+  every.onchange = show;
+  show();
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  let last = "None yet.";
+  if (a.last) last = when(a.last) + ({ made: ".", skipped: `, skipped. ${cap(a.note || "")}.`, failed: `, it didn't work. ${cap(a.note || "")}.` }[a.result] || ".");
+  const next = a.running ? "Making one now." : a.next ? when(a.next) + "." : "Automatic backups are off.";
+  const save = () => act(() => api("PUT", sp("/backups/auto"), { every: every.value, hours: +hours.value, at: time.value, keep: +keep.value }), "Saved.").then((ok) => ok && again());
+  return section("Automatic backups", "made by themselves, while the server runs too",
+    h("div", { class: "form" },
+      h("label", {}, "How often"), every,
+      hoursRow, timeRow,
+      h("label", {}, "Keep the newest"), h("div", { style: "width:90px" }, keep),
+      h("div", { class: "help" }, "Older automatic ones are deleted. Backups made by hand or marked to keep are never deleted. When nobody has played since the last one, or the disk is nearly full, MineNest skips one and says why."),
+      h("label", {}, "The last one"), h("span", {}, last),
+      h("label", {}, "The next one"), h("span", {}, next)),
+    h("div", { class: "row mt" }, h("button", { class: "btn primary", onclick: save }, "Save")));
 }
 
 // ------------------------------------------------------------------ internet

@@ -47,6 +47,10 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
                                         bring in a server you already have (it's copied)
 
   minenest backup|backups [SERVER]      back the world up, or list the backups
+  minenest backup auto [-s SERVER] [off|every HOURS|daily HH:MM] [--keep N]
+                                        automatic backups: see or change when they're made,
+                                        and how many of them to keep (10 unless you say)
+  minenest backup keep|unkeep BACKUP [-s SERVER]  keep one for good, or let it go again
   minenest restore BACKUP [-s SERVER]   put a backup back (the world now is backed up first)
   minenest new-world [-s SERVER] [--seed SEED]
 
@@ -86,7 +90,7 @@ type flags struct {
 
 var valueFlags = map[string]string{"-s": "server", "--server": "server", "-t": "type", "--type": "type", "-v": "version",
 	"--version": "version", "-m": "ram", "--memory": "ram", "--ram": "ram", "--modpack": "modpack", "--seed": "seed",
-	"--host": "host", "-b": "build", "--build": "build", "--loader": "build", "--user": "user", "--ssh-port": "ssh-port", "--port": "port", "--pin": "pin", "--name": "name", "-n": "lines"}
+	"--host": "host", "-b": "build", "--build": "build", "--loader": "build", "--user": "user", "--ssh-port": "ssh-port", "--port": "port", "--pin": "pin", "--name": "name", "-n": "lines", "--keep": "keep"}
 
 func parse(args []string) flags {
 	f := flags{vals: map[string]string{}, bools: map[string]bool{}}
@@ -396,6 +400,9 @@ func run(args []string) error {
 		fmt.Println(strings.Join(vs, "  "))
 		return nil
 	case "backup":
+		if len(f.pos) > 0 && (f.pos[0] == "auto" || f.pos[0] == "keep" || f.pos[0] == "unkeep") {
+			return backupMore(c, f)
+		}
 		id, err := pick(c, f.server(true))
 		if err != nil {
 			return err
@@ -414,7 +421,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		var r struct{ Backups []nest.Backup }
+		var r backupList
 		if err := c.get(sp(id)+"/backups", &r); err != nil {
 			return err
 		}
@@ -422,8 +429,20 @@ func run(args []string) error {
 			fmt.Println("No backups yet. Make one with: minenest backup")
 		}
 		for _, b := range r.Backups {
-			fmt.Printf("  %-26s %8s  %s\n", b.Name, size(b.Size), b.Why)
+			kept := ""
+			if b.Keep {
+				kept = " (kept)"
+			}
+			fmt.Printf("  %-26s %8s  %s%s\n", b.Name, size(b.Size), b.Why, kept)
 		}
+		if len(r.Backups) > 0 {
+			fmt.Printf("\nThey use %s.", size(r.Used))
+			if r.Free >= 0 {
+				fmt.Printf(" %s is free on this disk.", size(r.Free))
+			}
+			fmt.Println()
+		}
+		fmt.Println(autoWords(r.Auto))
 		return nil
 	case "restore":
 		id, err := pick(c, f.server(false))
@@ -1091,6 +1110,108 @@ func parseRAM(v string) (int, error) {
 		return 0, fmt.Errorf("memory is like 4G or 3072M")
 	}
 	return int(n * float64(mult)), nil
+}
+
+type backupList struct {
+	Backups []nest.Backup
+	Auto    nest.AutoStatus
+	Used    int64
+	Free    int64
+}
+
+// backupMore is "minenest backup auto ..." (the schedule) and "minenest backup keep|unkeep NAME".
+func backupMore(c *client, f flags) error {
+	id, err := pick(c, f.server(false))
+	if err != nil {
+		return err
+	}
+	what, args := f.pos[0], f.pos[1:]
+	if what == "keep" || what == "unkeep" {
+		if len(args) == 0 {
+			return fmt.Errorf("say which backup (minenest backups lists them)")
+		}
+		if err := c.post(sp(id)+"/backups/"+url.PathEscape(args[0])+"/keep", map[string]bool{"keep": what == "keep"}, nil); err != nil {
+			return err
+		}
+		if what == "keep" {
+			fmt.Println("Kept. MineNest won't delete it by itself.")
+		} else {
+			fmt.Println("It's no longer kept, so it goes when it's among the oldest automatic ones.")
+		}
+		return nil
+	}
+	var r backupList
+	if err := c.get(sp(id)+"/backups", &r); err != nil {
+		return err
+	}
+	a := r.Auto.AutoBackup
+	changed := false
+	if len(args) > 0 {
+		changed = true
+		switch args[0] {
+		case "off":
+			a.Every = ""
+		case "every":
+			if len(args) < 2 {
+				return fmt.Errorf("say how many hours, like: minenest backup auto every 6")
+			}
+			n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSuffix(args[1], "h"), "hours"))
+			if err != nil {
+				return fmt.Errorf("say how many hours, like: minenest backup auto every 6")
+			}
+			a.Every, a.Hours = "hours", n
+		case "daily":
+			if len(args) < 2 {
+				return fmt.Errorf("say what time, like: minenest backup auto daily 03:30")
+			}
+			a.Every, a.At = "day", args[1]
+		default:
+			return fmt.Errorf("say off, every HOURS or daily HH:MM")
+		}
+	}
+	if k := f.vals["keep"]; k != "" {
+		n, err := strconv.Atoi(k)
+		if err != nil || n < 1 {
+			return fmt.Errorf("--keep wants a number, like --keep 10")
+		}
+		a.Keep, changed = n, true
+	}
+	st := r.Auto
+	if changed {
+		if err := c.do("PUT", sp(id)+"/backups/auto", a, &st); err != nil {
+			return err
+		}
+	}
+	fmt.Println(autoWords(st))
+	return nil
+}
+
+// autoWords says how automatic backups are set, when the last was and when the next is.
+func autoWords(a nest.AutoStatus) string {
+	var b strings.Builder
+	if a.Every != "" {
+		fmt.Fprintf(&b, "Automatic backups %s, keeping the newest %d.", a.EveryWords(), a.Keep)
+	} else {
+		b.WriteString("Automatic backups are off. Turn them on with: minenest backup auto every 6 (or daily 03:30)")
+	}
+	when := func(u int64) string { return time.Unix(u, 0).Format("Mon 2 Jan 15:04") }
+	if a.Last > 0 {
+		fmt.Fprintf(&b, "\n  %-10s %s, ", "Last", when(a.Last))
+		switch a.Result {
+		case "made":
+			b.WriteString("made a backup")
+		case "skipped":
+			b.WriteString("skipped: " + a.Note)
+		case "failed":
+			b.WriteString("didn't work: " + a.Note)
+		}
+	}
+	if a.Running {
+		fmt.Fprintf(&b, "\n  %-10s %s", "Now", "making one")
+	} else if a.Next > 0 {
+		fmt.Fprintf(&b, "\n  %-10s %s", "Next", when(a.Next))
+	}
+	return b.String()
 }
 
 func isOn(v string) bool {

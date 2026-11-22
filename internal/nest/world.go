@@ -20,9 +20,17 @@ type Backup struct {
 	Size int64  `json:"size"`
 	Time int64  `json:"time"`
 	Why  string `json:"why"`
+	Auto bool   `json:"auto"` // made by the schedule (autobackup.go)
+	Keep bool   `json:"keep"` // marked to keep: never deleted by MineNest
+
+	print string // the world's files when it was made (worldPrint)
 }
 
+// keepBackups is how many of the ones made before risky changes are kept.
 const keepBackups = 20
+
+// saveWait is how long a running server has to say it saved.
+var saveWait = 60 * time.Second
 
 func (s *Server) backupDir() string { return filepath.Join(s.Dir, "backups") }
 
@@ -58,17 +66,23 @@ func (s *Server) backupLocked(ctx context.Context, why string, j *Job) (*Backup,
 		return nil, fmt.Errorf("there's no world yet: start the server once to make one")
 	}
 	if why == "" {
-		why = "Made by hand"
+		why = handWhy
 	}
 	if s.State() == Running {
 		j.Say("Asking the server to save")
-		s.Command("save-off")
-		defer s.Command("save-on")
+		// Saving stays off while the files are zipped, and is always turned on again, whatever
+		// happens (resumeSaving; and recoverBackup if MineNest itself stops half way).
+		s.pauseSaving()
+		defer s.resumeSaving()
 		if err := s.saveAll(ctx, true); err != nil {
 			return nil, err
 		}
 	}
-	name := time.Now().Format("2006-01-02_15-04-05") + ".zip"
+	stamp := time.Now().Format("2006-01-02_15-04-05")
+	name := stamp + ".zip"
+	for n := 2; exists(filepath.Join(s.backupDir(), name)); n++ {
+		name = fmt.Sprintf("%s_%d.zip", stamp, n) // two in one second: the later one sorts after
+	}
 	dest := filepath.Join(s.backupDir(), name)
 	if err := os.MkdirAll(s.backupDir(), 0o755); err != nil {
 		return nil, err
@@ -138,15 +152,19 @@ func (s *Server) backupLocked(ctx context.Context, why string, j *Job) (*Backup,
 		os.Remove(part)
 		return nil, fmt.Errorf("the backup failed: %v", err)
 	}
-	os.Rename(part, dest)
+	fp := s.worldPrint()
+	if err := os.Rename(part, dest); err != nil {
+		os.Remove(part)
+		return nil, fmt.Errorf("the backup failed: %v", err)
+	}
 	os.WriteFile(dest+".txt", []byte(why+"\n"), 0o644)
-	s.Note("Backed up the world (%s): %s", why, name)
-	s.pruneBackups()
 	st, _ := os.Stat(dest)
-	b := &Backup{Name: name, Why: why, Time: time.Now().Unix()}
+	b := &Backup{Name: name, Why: why, Time: time.Now().Unix(), Auto: why == autoWhy, print: fp}
 	if st != nil {
 		b.Size = st.Size()
 	}
+	s.Note("Backed up the world (%s, %s): %s", why, sizeWords(b.Size), name)
+	s.pruneBackups()
 	return b, nil
 }
 
@@ -161,25 +179,69 @@ func (s *Server) Backups() []Backup {
 		if err != nil {
 			continue
 		}
-		why, _ := os.ReadFile(filepath.Join(s.backupDir(), e.Name()+".txt"))
-		out = append(out, Backup{e.Name(), info.Size(), info.ModTime().Unix(), strings.TrimSpace(string(why))})
+		why, keep := s.backupNote(e.Name())
+		out = append(out, Backup{Name: e.Name(), Size: info.Size(), Time: info.ModTime().Unix(), Why: why, Auto: why == autoWhy, Keep: keep})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name > out[j].Name })
 	return out
 }
 
-// pruneBackups keeps the newest ones MineNest made by itself; ones made by hand are kept.
-func (s *Server) pruneBackups() {
-	n := 0
-	for _, b := range s.Backups() {
-		if b.Why == "Made by hand" {
-			continue
-		}
-		n++
-		if n > keepBackups {
-			s.DeleteBackup(b.Name)
+// backupNote reads the line beside a backup saying why it was made, and whether it's marked to
+// keep (a second line, "keep").
+func (s *Server) backupNote(name string) (why string, keep bool) {
+	b, _ := os.ReadFile(filepath.Join(s.backupDir(), name+".txt"))
+	lines := strings.Split(strings.ReplaceAll(string(b), "\r", ""), "\n")
+	why = strings.TrimSpace(lines[0])
+	for _, l := range lines[1:] {
+		if strings.TrimSpace(l) == "keep" {
+			keep = true
 		}
 	}
+	return why, keep
+}
+
+// KeepBackup marks a backup to keep (MineNest never deletes it by itself), or lets it go again.
+func (s *Server) KeepBackup(name string, keep bool) error {
+	p, err := s.backupPath(name)
+	if err != nil {
+		return err
+	}
+	why, _ := s.backupNote(name)
+	text := why + "\n"
+	if keep {
+		text += "keep\n"
+	}
+	if err := writeFile(p+".txt", []byte(text), 0o644); err != nil {
+		return err
+	}
+	if !keep {
+		s.pruneBackups()
+	}
+	return nil
+}
+
+// pruneBackups keeps the newest automatic ones (as many as the schedule says) and the newest
+// ones made before risky changes; ones made by hand or marked to keep are never deleted.
+func (s *Server) pruneBackups() {
+	for _, name := range pruneList(s.Backups(), s.Config().AutoBackup.keep(), keepBackups) {
+		s.DeleteBackup(name)
+	}
+}
+
+// BackupSpace is how much the backups use, and how much is free on their disk (-1: unknown).
+func (s *Server) BackupSpace() (used, free int64) {
+	for _, b := range s.Backups() {
+		used += b.Size
+	}
+	free = -1
+	dir := s.backupDir()
+	if !exists(dir) {
+		dir = s.Dir
+	}
+	if n, err := diskFree(dir); err == nil {
+		free = n
+	}
+	return used, free
 }
 
 func (s *Server) backupPath(name string) (string, error) {

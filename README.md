@@ -28,6 +28,13 @@ command line.
   new world. MineNest looks a name up with Mojang itself, tries again when Mojang's servers are
   busy, and the Players page says what really happened. Bedrock players go by their Floodgate
   name, like `.Steve`.
+- **Automatic backups:** on the World page (or `minenest backup auto every 6`, or
+  `daily 03:30`), every few hours or once a day, while the server runs too. MineNest keeps the
+  newest ten automatic ones unless you say otherwise, and never deletes backups you made by hand
+  or marked to keep (`minenest backup keep NAME`). It skips one, and says why, when nobody has
+  played since the last one or the disk is nearly full. A backup missed while the computer was
+  off is made soon after MineNest starts, and the server always goes back to saving its world
+  afterwards, even when a backup fails.
 - **Bring the servers you already have:** MineNest finds the ones on your computer, or you point
   it at a folder or upload a zip of one (**New server**, then **Add one you already have**, or
   `minenest import FOLDER`). It's copied in with its world, mods, plugins and settings, and the
@@ -71,6 +78,7 @@ minenest mods search "simple voice chat"
 minenest mods add simple-voice-chat
 minenest console                             # watch it and type commands
 minenest internet playit                     # let friends on the internet join
+minenest backup auto daily 03:30             # a backup every night, the newest ten kept
 minenest create "Cobblemon" --modpack cobblemon-fabric
 ```
 

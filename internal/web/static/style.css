@@ -98,7 +98,7 @@ main { flex: 1; overflow: auto; min-width: 0; }
 .console-input input { flex: 1; font-family: var(--mono); }
 
 /* Fields */
-input[type=text], input[type=number], input[type=password], input:not([type]), select, textarea {
+input[type=text], input[type=number], input[type=password], input[type=time], input:not([type]), select, textarea {
   background: var(--field); border: 1px solid var(--line2); border-radius: 4px; padding: 5px 8px; width: 100%; min-width: 0; }
 input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid color-mix(in srgb, var(--green) 70%, transparent); outline-offset: -1px; }
 input[type=range] { width: 100%; accent-color: var(--green); }
