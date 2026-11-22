@@ -109,7 +109,7 @@ function renderSide() {
       h("div", { class: "s" }, s.installed ? `${s.flavor_name} ${s.minecraft}` : s.busy ? "Setting up" : "Not installed"))));
 }
 function pickServer(id) {
-  S.vpsOpen = false;
+  S.vpsOpen = false; playerSaid = null;
   S.cur = id; S.view = "server"; localStorage.setItem("mn-cur", id);
   S.seq = 0; S.consoleFor = null; $("console").replaceChildren();
   refresh().then(() => renderTab(true));
@@ -263,9 +263,24 @@ async function tabAddons(s, full) {
 
 // ------------------------------------------------------------------ players
 
-function playerAct(action, name, reason) {
-  return act(() => api("POST", sp("/players"), { action, name, reason }), "Done.").then(() => { if (S.tab === "players") tabPlayers(S.status, true); });
+// What the last thing done to a player came to, shown on the Players page until the next one.
+let playerSaid = null;
+async function playerAct(action, name, reason) {
+  const forServer = S.cur;
+  playerSaid = { kind: "", text: s0(name) ? `Asking the server about ${name.trim()}...` : "Type a player's name first." };
+  if (S.tab === "players") tabPlayers(S.status, true);
+  if (!s0(name)) return;
+  try {
+    const r = await api("POST", sp("/players"), { action, name, reason });
+    playerSaid = { kind: "good", text: (r && r.message) || "Done." };
+    toast(playerSaid.text);
+  } catch (e) {
+    playerSaid = { kind: "bad", text: e.message };
+    toast(e.message, true);
+  }
+  if (S.tab === "players" && S.cur === forServer) tabPlayers(S.status, true);
 }
+const s0 = (v) => !!(v && v.trim());
 async function tabPlayers(s, full) {
   if (!full) return;
   const el = $("tab-players");
@@ -277,7 +292,9 @@ async function tabPlayers(s, full) {
     section("Add a player", null, h("div", { class: "row" }, h("div", { class: "grow", style: "max-width:260px" }, name),
       h("button", { class: "btn", onclick: () => playerAct("allow", name.value) }, "Add to whitelist"),
       h("button", { class: "btn", onclick: () => playerAct("op", name.value) }, "Make operator"),
-      h("button", { class: "btn danger", onclick: () => playerAct("ban", name.value) }, "Ban"))),
+      h("button", { class: "btn danger", onclick: () => playerAct("ban", name.value) }, "Ban")),
+      playerSaid ? h("div", { class: "mt" }, msg(playerSaid.kind, null, playerSaid.text)) : null,
+      h("p", { class: "muted small" }, "Java names have 1 to 16 letters, digits or underscores." + (s.bedrock_on ? " Bedrock players start with a dot, like .Steve." : ""))),
     section(`Online now`, `${p.online.length} of ${s.max_players}`,
       p.online.length ? p.online.map((n) => h("div", { class: "list-row" }, h("div", { class: "grow" }, h("b", {}, n)),
         h("button", { class: "btn small", onclick: () => playerAct("op", n) }, "Make operator"),

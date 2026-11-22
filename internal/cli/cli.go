@@ -36,6 +36,7 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
 
   minenest players [SERVER]             who's on, the whitelist, operators and bans
   minenest op|deop|kick|ban|pardon|allow|disallow PLAYER [-s SERVER]
+                                        (allow: the whitelist; a Bedrock player is .NAME)
   minenest set [-s SERVER] KEY=VALUE... change server.properties (minenest get to see them)
   minenest config [-s SERVER] [ram=4G] [autostart=on] [auto-restart=on] [name=NAME]
   minenest switch [-s SERVER] TYPE [VERSION] [-b BUILD]  change the type, version or build
@@ -295,10 +296,14 @@ func run(args []string) error {
 			return err
 		}
 		reason := strings.Join(f.pos[1:], " ")
-		if err := c.post(sp(id)+"/players", map[string]string{"action": cmd, "name": f.pos[0], "reason": reason}, nil); err != nil {
+		var said struct{ Message string }
+		if err := c.post(sp(id)+"/players", map[string]string{"action": cmd, "name": f.pos[0], "reason": reason}, &said); err != nil {
 			return err
 		}
-		fmt.Println("Done.")
+		if said.Message == "" {
+			said.Message = "Done."
+		}
+		fmt.Println(said.Message)
 		return nil
 	case "get":
 		id, err := pick(c, f.server(false))

@@ -24,7 +24,9 @@ command line.
 - **Bedrock players** (phones, consoles, Windows) through GeyserMC's Geyser and Floodgate.
 - **Players, settings, worlds:** whitelist, operators, bans, kicks; every server.properties
   setting with friendly names; backups that work while the server runs; put one back or start a
-  new world.
+  new world. MineNest looks a name up with Mojang itself, tries again when Mojang's servers are
+  busy, and the Players page says what really happened. Bedrock players go by their Floodgate
+  name, like `.Steve`.
 - **Bring the servers you already have:** MineNest finds the ones on your computer, or you point
   it at a folder or upload a zip of one (**New server**, then **Add one you already have**, or
   `minenest import FOLDER`). It's copied in with its world, mods, plugins and settings, and the

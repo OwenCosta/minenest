@@ -500,7 +500,11 @@ func (a *api) routes() http.Handler {
 		}
 		var o struct{ Action, Name, Reason string }
 		body(r, &o)
-		return nil, s.PlayerAction(r.Context(), o.Action, o.Name, o.Reason)
+		said, err := s.PlayerAction(r.Context(), o.Action, o.Name, o.Reason)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"message": said}, nil
 	})
 
 	// World and backups
