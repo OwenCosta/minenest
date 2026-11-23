@@ -58,7 +58,7 @@ func (m *Manager) filesChangeAllowed(r *http.Request) error {
 	return nil
 }
 
-// An answer through the website is held in memory on its way (and the relay will not take a big
+// An answer through the website is held in memory on its way (and the website will not take a big
 // one), so a download through it has a ceiling. The home network streams, so it has none.
 var remoteSendLimit int64 = 16 << 20
 
