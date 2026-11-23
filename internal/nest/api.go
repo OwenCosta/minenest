@@ -230,6 +230,7 @@ func (a *api) routes() http.Handler {
 	})
 
 	h("GET /api/info", func(r *http.Request) (any, error) { return a.m.Info(), nil })
+	h("GET /api/memory", func(r *http.Request) (any, error) { return a.m.Memory(), nil })
 	h("POST /api/shutdown", func(r *http.Request) (any, error) {
 		go func() {
 			time.Sleep(200 * time.Millisecond)

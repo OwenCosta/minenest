@@ -35,6 +35,12 @@ command line.
   played since the last one or the disk is nearly full. A backup missed while the computer was
   off is made soon after MineNest starts, and the server always goes back to saving its world
   afterwards, even when a backup fails.
+- **How much memory is left:** MineNest says how much of the computer's memory is still free 
+  for servers and what size of server fits ("enough for one more 4 GB server, or two 2 GB 
+  ones"), in the sidebar, on the New server page, in a server's Settings and in `minenest 
+  memory`. It counts what running servers are given and really use, leaves room for the 
+  operating system, and warns, without stopping you, before a server that wouldn't fit is made 
+  or started. Where a number can't be read, it says so.
 - **Bring the servers you already have:** MineNest finds the ones on your computer, or you point
   it at a folder or upload a zip of one (**New server**, then **Add one you already have**, or
   `minenest import FOLDER`). It's copied in with its world, mods, plugins and settings, and the
@@ -74,6 +80,7 @@ minenest create "Survival" -t paper          # or fabric, neoforge, forge, purpu
 minenest eula                                # read and agree to Minecraft's EULA
 minenest start
 minenest status                              # where friends join
+minenest memory                              # how much memory is left for servers
 minenest mods search "simple voice chat"
 minenest mods add simple-voice-chat
 minenest console                             # watch it and type commands

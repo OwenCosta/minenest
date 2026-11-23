@@ -34,6 +34,7 @@ type Manager struct {
 	playit   *playitAgent
 	relay    *relayState
 	auto     *autoSched
+	mem      memCache // the memory summary, for a few seconds (memory.go)
 
 	ocSession, ocKey string // an OCAccount sign-in waiting for the browser
 	api              *api
@@ -386,6 +387,10 @@ type ServerStatus struct {
 	VPS            TunnelConfig `json:"vps"` // the VPS set up, if any (its key stays in tunnel/)
 	WhitelistOn    bool         `json:"whitelist_on"`
 	WhitelistCount int          `json:"whitelist_count"`
+	MemUsedMB      int          `json:"mem_used_mb"` // what its Java uses now (0: stopped, or it couldn't be read)
+	MemCanHaveMB   int          `json:"mem_room_mb"` // the most memory it could be given and still fit (memory.go)
+	MemFits        bool         `json:"mem_fits"`    // its memory setting fits (true when that can't be told)
+	MemWarning     string       `json:"mem_warning"` // what to say before it starts, when it doesn't fit
 }
 
 func (m *Manager) Status(s *Server) ServerStatus {
@@ -438,6 +443,14 @@ func (m *Manager) Status(s *Server) ServerStatus {
 	if st.Way.Up && st.Way.Address != "" {
 		st.Addresses.Public = st.Way.Address
 	}
+	mem := m.Memory()
+	st.MemFits = true
+	if sm, ok := mem.server(s.ID); ok && mem.Known {
+		st.MemUsedMB, st.MemCanHaveMB, st.MemFits = sm.UsedMB, sm.CanHaveMB, sm.Fits
+		if !sm.Fits {
+			st.MemWarning = FitWarning(sm.RAMMB, sm.CanHaveMB, true)
+		}
+	}
 	return st
 }
 
@@ -467,10 +480,11 @@ type Info struct {
 	Cloud    string         `json:"cloud"`
 	Jobs     []jobView      `json:"jobs"`
 	Props    []PropertyInfo `json:"common_properties"`
+	Memory   MemorySummary  `json:"memory"`
 }
 
 func (m *Manager) Info() Info {
 	set := m.Settings()
 	return Info{Version: Version, OS: runtime.GOOS, Arch: runtime.GOARCH, MemoryMB: totalMemoryMB(), Home: Home(),
-		LAN: lanAddress(), Flavors: Flavors, Account: set.AccountName, Cloud: set.Cloud, Jobs: m.Jobs.list(), Props: CommonProperties}
+		LAN: lanAddress(), Flavors: Flavors, Account: set.AccountName, Cloud: set.Cloud, Jobs: m.Jobs.list(), Props: CommonProperties, Memory: m.Memory()}
 }

@@ -296,6 +296,14 @@ func (s *Server) Start() error {
 		return fmt.Errorf("something else on this computer is using port %d. Close it, or change the port in Settings", port)
 	}
 
+	// Too little memory free doesn't stop it starting, but the console says so first.
+	memNote := ""
+	if mem := s.m.Memory(); mem.Known {
+		if sm, ok := mem.server(s.ID); ok && !sm.Fits {
+			memNote = FitWarning(cfg.RAM, sm.CanHaveMB, true)
+		}
+	}
+
 	args := []string{fmt.Sprintf("-Xmx%dM", cfg.RAM), fmt.Sprintf("-Xms%dM", min(cfg.RAM, 1024))}
 	if cfg.JVMArgs != "" {
 		args = append(args, strings.Fields(cfg.JVMArgs)...)
@@ -343,6 +351,9 @@ func (s *Server) Start() error {
 	s.exited = make(chan struct{})
 	exited := s.exited
 	s.addLineLocked(fmt.Sprintf("Starting %s %s with %d MB of memory.", flavorName(cfg.Flavor), cfg.Installed.Minecraft, cfg.RAM), "nest")
+	if memNote != "" {
+		s.addLineLocked(memNote, "nest")
+	}
 	s.mu.Unlock()
 
 	if d != nil {

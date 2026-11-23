@@ -25,6 +25,7 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
                                         forge, purpur; VERSION: latest or e.g. 1.21.4)
   minenest start|stop|restart|kill [SERVER]
   minenest status [SERVER]              how it's doing, and where friends join
+  minenest memory                       how much memory is left for servers, and what fits
   minenest console [SERVER]             watch the console and type commands (Ctrl+C leaves)
   minenest cmd [-s SERVER] COMMAND...   send one command, like: minenest cmd say hi
   minenest eula [SERVER]                read and agree to Minecraft's EULA (needed once)
@@ -199,10 +200,16 @@ func run(args []string) error {
 		return nil
 	case "status", "info":
 		return status(c, f.server(true))
+	case "memory", "mem", "ram":
+		return memory(c)
 	case "start":
 		id, err := pick(c, f.server(true))
 		if err != nil {
 			return err
+		}
+		var st nest.ServerStatus
+		if c.get(sp(id), &st) == nil && st.MemWarning != "" && st.State == nest.Stopped {
+			fmt.Println(st.MemWarning)
 		}
 		if err := c.post(sp(id)+"/start", nil, nil); err != nil {
 			if strings.Contains(err.Error(), "EULA") {
@@ -622,7 +629,18 @@ func status(c *client, ref string) error {
 	if s.Modpack != "" {
 		fmt.Printf("  %-14s %s\n", "Modpack", s.Modpack)
 	}
-	fmt.Printf("  %-14s %d MB\n", "Memory", s.RAM)
+	mem := fmt.Sprintf("%d MB", s.RAM)
+	if s.MemUsedMB > 0 {
+		mem += ", using " + gb(s.MemUsedMB) + " now"
+	}
+	fmt.Printf("  %-14s %s\n", "Memory", mem)
+	var sum nest.MemorySummary
+	if c.get("/api/memory", &sum) == nil && sum.Known {
+		fmt.Printf("  %-14s %s\n", "", sum.Words)
+		if s.MemWarning != "" && s.State == nest.Stopped {
+			fmt.Printf("  %-14s %s\n", "", s.MemWarning)
+		}
+	}
 	fmt.Printf("  %-14s %d/%d %s\n", "Players", len(s.Players), s.MaxPlayers, strings.Join(s.Players, ", "))
 	fmt.Printf("  %-14s %s\n", "This computer", s.Addresses.Here)
 	if s.Addresses.Home != "" {
@@ -675,6 +693,12 @@ func create(c *client, f flags) error {
 	o := nest.CreateOptions{Name: name, Flavor: f.vals["type"], Version: f.vals["version"], RAM: ram, Modpack: f.vals["modpack"], Build: f.vals["build"]}
 	if f.bools["agree-eula"] || f.bools["eula"] {
 		o.AgreeEULA = true
+	}
+	var sum nest.MemorySummary
+	if ram > 0 && c.get("/api/memory", &sum) == nil {
+		if w := nest.FitWarning(ram, sum.GiveMB, sum.Known); w != "" {
+			fmt.Println(w)
+		}
 	}
 	var r jobResp
 	if err := c.post("/api/servers", o, &r); err != nil {
@@ -930,7 +954,74 @@ func config(c *client, f flags) error {
 			return fmt.Errorf("unknown setting %q (ram, autostart, auto-restart, real-ips, name, jvm-args). For server.properties use: minenest set", k)
 		}
 	}
-	return c.do("PATCH", sp(id), patch, nil)
+	if err := c.do("PATCH", sp(id), patch, nil); err != nil {
+		return err
+	}
+	if _, ok := patch["ram_mb"]; ok {
+		var s nest.ServerStatus
+		if c.get(sp(id), &s) == nil && s.MemWarning != "" {
+			fmt.Println(s.MemWarning)
+		}
+	}
+	return nil
+}
+
+// memory is "minenest memory": the computer's memory, the servers' share, and what fits.
+func memory(c *client) error {
+	var sum nest.MemorySummary
+	if err := c.get("/api/memory", &sum); err != nil {
+		return err
+	}
+	if !sum.Known {
+		fmt.Println(sum.Words)
+		return nil
+	}
+	row := func(k, v string) { fmt.Printf("  %-22s %s\n", k, v) }
+	fmt.Println("Memory on this computer")
+	row("In all", gb(sum.TotalMB))
+	if sum.FreeMB > 0 {
+		row("In use now", fmt.Sprintf("%s (%s free)", gb(sum.UsedMB), gb(sum.FreeMB)))
+	} else {
+		row("In use now", "couldn't be read")
+	}
+	row("Left for the computer", gb(sum.ReserveMB))
+	running := gb(sum.RunningMB) + " given"
+	if sum.RunningMB > 0 && sum.RealMB > 0 {
+		running += ", using " + gb(sum.RealMB) + " now"
+	}
+	row("Running servers", running)
+	row("Stopped servers", gb(sum.StoppedMB)+" given")
+	if len(sum.Servers) > 0 {
+		fmt.Println()
+		for _, s := range sum.Servers {
+			line := gb(s.RAMMB) + " given"
+			switch {
+			case s.Running && s.UsedMB > 0:
+				line += ", using " + gb(s.UsedMB)
+			case !s.Running && s.Fits:
+				line += ", fits if it starts now"
+			case !s.Running:
+				line += ", more than is free now (" + gb(s.CanHaveMB) + " would fit)"
+			}
+			fmt.Printf("  %-22s %-9s %s\n", cut(s.Name, 22), s.State, line)
+		}
+	}
+	fmt.Println()
+	fmt.Println(sum.Words)
+	for _, n := range append([]string{sum.Fits, sum.Stopped}, sum.Notes...) {
+		if n != "" {
+			fmt.Println(n)
+		}
+	}
+	return nil
+}
+
+// gb is a size in MB in plain words: 512 MB, 4 GB, 5.5 GB.
+func gb(mb int) string {
+	if mb < 1024 {
+		return fmt.Sprintf("%d MB", max(0, mb))
+	}
+	return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(mb)/1024), ".0") + " GB"
 }
 
 func internet(c *client, f flags) error {

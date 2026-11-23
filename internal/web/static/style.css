@@ -40,6 +40,9 @@ a { color: var(--blue); }
 .ver { color: var(--faint); font-size: 12px; margin-top: 4px; }
 #update-note .msg { margin: 0 0 10px; font-size: 12.5px; }
 #update-note .btn { margin-top: 6px; width: 100%; }
+#mem-note { font-size: 12.5px; margin-bottom: 6px; }
+#mem-note .link { color: var(--dim); }
+.modal-box .kv { grid-template-columns: 170px 1fr; }
 .cover { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); z-index: 50; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; }
 
 main { flex: 1; overflow: auto; min-width: 0; }

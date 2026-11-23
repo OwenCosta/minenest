@@ -85,13 +85,44 @@ type memoryStatusEx struct {
 
 var procGlobalMemoryStatusEx = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalMemoryStatusEx")
 
-func totalMemoryMB() int {
+// readSysMemory is the computer's memory and what's available now (GlobalMemoryStatusEx).
+func readSysMemory() sysMemory {
 	var m memoryStatusEx
 	m.Length = uint32(unsafe.Sizeof(m))
 	if r, _, _ := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&m))); r == 0 {
+		return sysMemory{}
+	}
+	return sysMemory{TotalMB: int(m.TotalPhys >> 20), AvailMB: int(m.AvailPhys >> 20)}
+}
+
+type processMemoryCounters struct {
+	Cb, PageFaultCount                                 uint32
+	PeakWorkingSetSize, WorkingSetSize                 uintptr
+	QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage       uintptr
+	QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage uintptr
+	PagefileUsage, PeakPagefileUsage                   uintptr
+}
+
+var procGetProcessMemoryInfo = windows.NewLazySystemDLL("kernel32.dll").NewProc("K32GetProcessMemoryInfo")
+
+// processMemoryMB is what a process has in memory now (its working set), or 0.
+func processMemoryMB(pid int) int {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_VM_READ, false, uint32(pid))
+	if err != nil {
+		if h, err = windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid)); err != nil {
+			return 0
+		}
+	}
+	defer windows.CloseHandle(h)
+	if procGetProcessMemoryInfo.Find() != nil {
 		return 0
 	}
-	return int(m.TotalPhys >> 20)
+	var c processMemoryCounters
+	c.Cb = uint32(unsafe.Sizeof(c))
+	if r, _, _ := procGetProcessMemoryInfo.Call(uintptr(h), uintptr(unsafe.Pointer(&c)), uintptr(c.Cb)); r == 0 {
+		return 0
+	}
+	return int(c.WorkingSetSize >> 20)
 }
 
 func processAlive(pid int) bool {

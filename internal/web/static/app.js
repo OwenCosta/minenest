@@ -55,6 +55,7 @@ async function act(fn, okText) {
     return r || true;
   } catch (e) { toast(e.message, true); return null; }
 }
+const gb = (mb) => (mb < 1024 ? `${Math.max(0, mb)} MB` : `${(mb / 1024).toFixed(1).replace(".0", "")} GB`);
 const stateWord = (s) => (s.busy && s.state === "stopped" ? "Busy" : { running: "Running", starting: "Starting", stopping: "Stopping", stopped: "Stopped" }[s.state] || s.state);
 
 // ------------------------------------------------------------------ jobs
@@ -88,7 +89,9 @@ setInterval(() => { if (S.watching.size) pollJobs(); }, 600);
 
 async function refresh() {
   try { S.servers = await api("GET", "/api/servers"); } catch (e) { return; }
+  try { S.mem = await api("GET", "/api/memory"); } catch (e) {}
   renderSide();
+  renderMemNote();
   if (S.view !== "server") return;
   if (!S.servers.length) { show("empty"); return; }
   if (!S.cur || !S.servers.find((s) => s.id === S.cur)) {
@@ -108,6 +111,31 @@ function renderSide() {
       h("div", { class: "t" }, h("span", {}, s.name), h("span", { class: "state " + s.state }, s.state === "stopped" ? "" : stateWord(s))),
       h("div", { class: "s" }, s.installed ? `${s.flavor_name} ${s.minecraft}` : s.busy ? "Setting up" : "Not installed"))));
 }
+// The sidebar's line about memory, and the dialog it opens.
+function renderMemNote() {
+  const m = S.mem;
+  fill($("mem-note"), m && m.known ? h("button", { class: "link", title: m.words, onclick: memoryDialog }, m.short) : null);
+}
+function memoryDialog() {
+  const m = S.mem;
+  if (!m) return;
+  const kv = (k, v) => [h("span", {}, k), h("span", {}, v)];
+  modal(h("h2", {}, "Memory"),
+    h("div", { class: "kv" },
+      kv(m.limited ? "MineNest's limit" : "This computer", gb(m.total_mb)),
+      kv("In use now", m.free_mb ? `${gb(m.used_mb)}, ${gb(m.free_mb)} free` : "Couldn't be read"),
+      kv("Left for the computer", gb(m.reserve_mb)),
+      kv("Running servers", `${gb(m.running_mb)} given` + (m.running_mb && m.real_mb ? `, using ${gb(m.real_mb)}` : "")),
+      kv("Stopped servers", `${gb(m.stopped_mb)} given`)),
+    m.servers.length ? h("div", { class: "mt" }, m.servers.map((x) => h("div", { class: "list-row" },
+      h("span", { class: "grow" }, x.name),
+      h("span", { class: "muted" }, x.running ? (x.used_mb ? `using ${gb(x.used_mb)} of ${gb(x.ram_mb)}` : `${gb(x.ram_mb)} given`) : `${gb(x.ram_mb)} given, ` + (x.fits ? "fits" : `${gb(x.can_have_mb)} would fit`))))) : null,
+    h("p", {}, m.words, " ", m.fits || ""),
+    m.stopped ? h("p", { class: "muted" }, m.stopped) : null,
+    m.notes.map((n) => h("p", { class: "muted small" }, n)),
+    h("div", { class: "modal-actions" }, h("button", { class: "btn primary", onclick: closeModal }, "Close")));
+}
+
 function pickServer(id) {
   S.vpsOpen = false; playerSaid = null;
   S.cur = id; S.view = "server"; localStorage.setItem("mn-cur", id);
@@ -154,6 +182,7 @@ function tabOverview(s) {
   if (s.installed && s.eula_needed) notes.push(msg("warn", "One more step", "Agree to Minecraft's EULA before the first start. ", h("button", { class: "link", onclick: eulaDialog }, "Read it and agree")));
   if (s.whitelist_on && !s.whitelist_count) notes.push(msg("warn", "Whitelist", "Only listed players can join and the list is empty. ", h("button", { class: "link", onclick: () => setTab("players") }, "Add players or turn it off")));
   if (s.why && s.state === "stopped") notes.push(msg("bad", "It stopped by itself:", s.why));
+  if (s.mem_warning && s.state === "stopped" && s.installed) notes.push(msg("warn", "Memory", s.mem_warning));
   if (way.claim_url && s.state === "running") notes.push(msg("warn", "playit.gg", "Approve this computer on your playit.gg account (once): ", h("a", { href: way.claim_url, target: "_blank", rel: "noopener" }, "open playit.gg")));
   fill($("tab-overview"), notes,
     h("div", { class: "cols" },
@@ -170,7 +199,7 @@ function tabOverview(s) {
         h("span", {}, "Players"), h("span", {}, s.players.length ? s.players.join(", ") : (s.state === "running" ? "Nobody on" : "None")),
         h("span", {}, "Software"), h("span", {}, s.installed ? `${s.flavor_name} ${s.minecraft}${s.build ? `, build ${s.build}` : ""}` : "Not installed"),
         h("span", {}, "Java"), h("span", {}, s.java ? `Java ${s.java}` : ""),
-        h("span", {}, "Memory"), h("span", {}, `${s.ram_mb} MB`),
+        h("span", {}, "Memory"), h("span", {}, s.state !== "stopped" && s.mem_used_mb ? `Using ${gb(s.mem_used_mb)} of ${gb(s.ram_mb)}` : `${gb(s.ram_mb)} given`),
         h("span", {}, "Internet"), h("span", {}, wayNames[way.kind || ""] + (way.kind && way.state ? ` (${way.state})` : "")),
         h("span", {}, "Folder"), h("span", { class: "small", style: "word-break:break-all" }, s.folder)))));
 }
@@ -375,7 +404,16 @@ async function tabSettings(s, full) {
   const save = () => act(() => api("PUT", sp("/properties"), changes), "Saved." + (s.state !== "stopped" ? " It counts after a restart." : ""));
   const mem = h("input", { type: "range", min: 512, max: Math.max(1024, S.info.memory_mb - 512), step: 256, value: s.ram_mb });
   const memLbl = h("span", {}, `${s.ram_mb} MB`);
-  mem.oninput = () => (memLbl.textContent = `${mem.value} MB`);
+  const memWarn = h("div", { class: "wide" });
+  const memCheck = () => {
+    memLbl.textContent = `${mem.value} MB`;
+    const room = S.mem && S.mem.known ? s.mem_room_mb : null;
+    fill(memWarn, room != null && +mem.value > room ? msg("warn", "Memory", room >= 1024
+      ? `Only about ${gb(room)} is free for this server${s.state !== "stopped" ? " at its next start" : ""}, so ${gb(+mem.value)} may make it slow or run out. You can still save it.`
+      : `This computer doesn't have ${gb(+mem.value)} free for it right now. You can still save it, but it may run slowly or run out.`) : null);
+  };
+  mem.oninput = memCheck;
+  memCheck();
   const jvm = h("input", { value: s.jvm_args, placeholder: "Most people leave this empty" });
   let flavor = s.flavor, pick = null;
   const pickerBox = h("div");
@@ -390,7 +428,9 @@ async function tabSettings(s, full) {
     section("Memory and starting", null,
       h("div", { class: "form" },
         h("label", {}, "Memory"), h("div", { class: "row" }, h("div", { class: "grow" }, mem), memLbl),
-        h("div", { class: "help" }, `This computer has ${S.info.memory_mb} MB. 2 to 4 GB suits most servers, big modpacks want 6 to 8.`),
+        h("div", { class: "help" }, `This computer has ${gb(S.info.memory_mb)}. 2 to 4 GB suits most servers, big modpacks want 6 to 8.`,
+          S.mem && S.mem.known ? ` ${s.state !== "stopped" ? (s.mem_used_mb ? `It's using ${gb(s.mem_used_mb)} now. ` : "") + `At most ${gb(s.mem_room_mb)} would fit at its next start.` : `At most ${gb(s.mem_room_mb)} would fit if it started now.`}` : ""),
+        memWarn,
         h("label", {}, "Java options"), jvm,
         h("span"), h("label", { class: "check" }, h("input", { type: "checkbox", checked: s.autostart, onchange: (e) => act(() => api("PATCH", sp(), { autostart: e.target.checked }), "Saved.") }), h("span", {}, "Start it when MineNest starts")),
         h("span"), h("label", { class: "check" }, h("input", { type: "checkbox", checked: s.auto_restart, onchange: (e) => act(() => api("PATCH", sp(), { auto_restart: e.target.checked }), "Saved.") }), h("span", {}, "Start it again if it crashes"))),
@@ -571,8 +611,14 @@ function openCreate() {
   const st = { flavor: "paper", modpack: null, packTitle: "" };
   const total = S.info.memory_mb || 4096;
   const name = h("input", { placeholder: "My Server", maxlength: 40 });
-  const mem = h("input", { type: "range", min: 1024, max: Math.max(1536, total - 1024), step: 256, value: Math.min(Math.floor(total / 2 / 256) * 256, 2048) });
+  const give = S.mem && S.mem.known ? S.mem.give_mb : null;
+  const firstMem = Math.min(Math.floor(total / 2 / 256) * 256, 2048);
+  const mem = h("input", { type: "range", min: 1024, max: Math.max(1536, total - 1024), step: 256, value: give != null && give >= 1024 ? Math.min(firstMem, give) : firstMem });
   const memLbl = h("span", {}, `${mem.value} MB`);
+  const memWarn = h("div", { class: "wide" });
+  const memCheck = () => fill(memWarn, give != null && +mem.value > give ? msg("warn", "Memory", give >= 1024
+    ? `Only about ${gb(give)} is free for another server right now, so ${gb(+mem.value)} may make it slow or run out. You can still make it, and stop another server before starting this one.`
+    : `This computer doesn't have memory free for another server right now. You can still make it, and stop another server before starting this one.`) : null);
   const eula = h("input", { type: "checkbox" });
   const autostart = h("input", { type: "checkbox" });
   const settings = { "white-list": "false" };
@@ -598,7 +644,7 @@ function openCreate() {
     pick = versionPicker(st.flavor, null, (v) => { sum.buildLabel = v.buildLabel; drawSummary(); });
     fill(pickerBox, pick.el);
   };
-  mem.oninput = () => { memLbl.textContent = `${mem.value} MB`; drawSummary(); };
+  mem.oninput = () => { memLbl.textContent = `${mem.value} MB`; memCheck(); drawSummary(); };
   name.oninput = drawSummary;
 
   const pq = h("input", { placeholder: 'Search modpacks, like "Cobblemon" or "All the Mods"' });
@@ -636,12 +682,13 @@ function openCreate() {
     h("div", { class: "create mt" },
       h("div", {},
         section(h("span", {}, h("span", { class: "step" }, "1"), "Server type"), "what it runs",
-          typeList(st.flavor, (id) => { st.flavor = id; packArea.classList.toggle("hidden", id !== "modpack"); if (id === "modpack") { mem.value = Math.min(6144, total - 1024); memLbl.textContent = `${mem.value} MB`; searchPacks(); } drawPicker(); drawSummary(); }, true)),
+          typeList(st.flavor, (id) => { st.flavor = id; packArea.classList.toggle("hidden", id !== "modpack"); if (id === "modpack") { mem.value = Math.min(6144, total - 1024); memLbl.textContent = `${mem.value} MB`; memCheck(); searchPacks(); } drawPicker(); drawSummary(); }, true)),
         section(h("span", {}, h("span", { class: "step" }, "2"), "Version"), "the newest unless you pick one", pickerBox, packArea),
         section(h("span", {}, h("span", { class: "step" }, "3"), "Name and memory"), null,
           h("div", { class: "form" }, h("label", {}, "Name"), name,
             h("label", {}, "Memory"), h("div", { class: "row" }, h("div", { class: "grow" }, mem), memLbl),
-            h("div", { class: "help" }, `This computer has ${total} MB. 2 to 4 GB suits most servers, modpacks want 6 or more.`),
+            h("div", { class: "help" }, `This computer has ${gb(total)}. 2 to 4 GB suits most servers, modpacks want 6 or more.`, S.mem && S.mem.known ? ` ${S.mem.words} ${S.mem.fits}` : ""),
+            memWarn,
             h("span"), h("label", { class: "check" }, autostart, h("span", {}, "Start it whenever MineNest starts")))),
         section(h("span", {}, h("span", { class: "step" }, "4"), "Game"), "server.properties",
           h("div", { class: "form" }, game.filter((k) => P[k]).map((k) => propField(P[k], undefined, track)), toggles.filter((k) => P[k]).map((k) => propField(P[k], k === "white-list" ? "false" : undefined, track))))),
@@ -650,6 +697,7 @@ function openCreate() {
         h("button", { class: "btn primary big", onclick: (e) => make(e.target) }, "Make the server"))));
   drawPicker();
   drawSummary();
+  memCheck();
   name.focus();
 }
 
@@ -849,7 +897,9 @@ async function main() {
   $("open-account").onclick = openAccount;
   $("btn-start").onclick = () => {
     if (S.status.eula_needed) { eulaDialog(); return; }
-    act(() => api("POST", sp("/start")), "Starting...").then(() => setTab("console"));
+    const go = () => act(() => api("POST", sp("/start")), "Starting...").then(() => setTab("console"));
+    if (S.status.mem_warning) confirmDialog("Start it anyway?", S.status.mem_warning, "Start it", go);
+    else go();
   };
   $("btn-stop").onclick = () => act(() => api("POST", sp("/stop")), "Stopping, the world is saved first.");
   $("btn-restart").onclick = () => act(() => api("POST", sp("/restart")));
