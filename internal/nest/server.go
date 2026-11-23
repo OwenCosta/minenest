@@ -222,7 +222,7 @@ func (s *Server) read(r io.Reader, cmd *exec.Cmd) {
 		} else if chatRe.MatchString(text) {
 			kind = "chat"
 		}
-		if savedRe.MatchString(text) && s.saved != nil {
+		if kind != "chat" && savedRe.MatchString(text) && s.saved != nil {
 			close(s.saved)
 			s.saved = nil
 		}
@@ -275,8 +275,17 @@ func (s *Server) Start() error {
 		s.mu.Unlock()
 		return fmt.Errorf("wait for %s to finish first", b)
 	}
+	// Held until Start is done, so a backup or a change can't begin in the gaps below.
+	s.busy = "starting up"
 	cfg := s.cfg
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.busy == "starting up" {
+			s.busy = ""
+		}
+		s.mu.Unlock()
+	}()
 	if cfg.Installed == nil {
 		return fmt.Errorf("the server software isn't installed yet")
 	}
@@ -481,6 +490,11 @@ func (s *Server) Stop() error {
 		s.mu.Unlock()
 		return nil
 	}
+	if backupBusy(s.busy) && s.state == Running {
+		// The server writes its last save while it stops, in the middle of the zip.
+		s.mu.Unlock()
+		return fmt.Errorf("wait for %s to finish first, then stop the server", s.busyNow())
+	}
 	if s.state == Stopping {
 		s.mu.Unlock()
 		return nil
@@ -529,6 +543,14 @@ func (s *Server) StopAndWait(ctx context.Context) error {
 	if !running {
 		return nil
 	}
+	// A backup that is zipping the world finishes first (Shutdown cancels them).
+	for s.busyBackup() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 	s.Stop()
 	select {
 	case <-exited:
@@ -536,6 +558,21 @@ func (s *Server) StopAndWait(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// backupBusy says whether what the server's files are busy with is a backup being made.
+func backupBusy(busy string) bool { return busy == "a backup" || busy == "an automatic backup" }
+
+func (s *Server) busyBackup() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return backupBusy(s.busy)
+}
+
+func (s *Server) busyNow() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.busy
 }
 
 // saveAll asks a running server to write the world to disk and waits for it to say it has.

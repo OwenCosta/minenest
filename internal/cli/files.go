@@ -105,6 +105,11 @@ func files(c *client, f flags) error {
 		return nil
 	}
 	sub, args := f.pos[0], f.pos[1:]
+	switch sub {
+	case "ls", "list", "cat", "put", "get", "mkdir", "mv", "move", "cp", "copy", "rm", "delete", "unzip", "trash":
+	default:
+		return fmt.Errorf("there's no files command called %q. Run minenest files to see them", sub)
+	}
 	id, err := pick(c, f.server(false))
 	if err != nil {
 		return err
@@ -226,10 +231,20 @@ func files(c *client, f flags) error {
 		for _, a := range args {
 			paths = append(paths, pathArg(a))
 		}
-		if err := c.filesDo("POST", base+"/delete", map[string]any{"paths": paths}, nil); err != nil {
+		var r struct {
+			Trashed int
+			Failed  []struct{ Path, Why string }
+		}
+		if err := c.filesDo("POST", base+"/delete", map[string]any{"paths": paths}, &r); err != nil {
 			return err
 		}
-		fmt.Printf("Moved %d to the trash. Bring it back with: minenest files trash restore ID (minenest files trash lists them)\n", len(paths))
+		fmt.Printf("Moved %d to the trash. Bring it back with: minenest files trash restore ID (minenest files trash lists them)\n", r.Trashed)
+		for _, x := range r.Failed {
+			fmt.Printf("%s stayed where it was: %s.\n", x.Path, x.Why)
+		}
+		if len(r.Failed) > 0 {
+			return fmt.Errorf("%d could not be moved", len(r.Failed))
+		}
 		return nil
 	case "unzip":
 		if err := need(1, "which zip"); err != nil {

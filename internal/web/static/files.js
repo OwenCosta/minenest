@@ -122,7 +122,8 @@ function listView() {
     h("p", { class: "muted small mt" },
       l.running ? "The server is running, so its world and its own program are locked. " : "",
       l.free >= 0 ? `${fsize(l.free)} is free on this disk. ` : "",
-      canChange() ? `Files up to ${fsize(l.max_upload)} can be uploaded; drop them on the list.` : "")];
+      canChange() ? `Files up to ${fsize(l.max_upload)} can be uploaded; drop them on the list. ` : "",
+      l.web ? `Through the website, files bigger than ${fsize(l.max_upload)} can't be sent either way. Use the home network, or the computer MineNest runs on.` : "")];
 }
 
 function fileRow(e) {
@@ -188,8 +189,13 @@ function copyDialog(p, e) {
   });
 }
 function deleteDialog(p, e) {
-  confirmDialog(`Delete ${e.name}?`, "It goes to the trash, where you can bring it back or delete it for good.", "Move to trash", async () => {
-    try { await api("POST", fpath("/delete"), { paths: [p] }); toast("Moved to the trash."); loadFiles(F.path); } catch (er) { toast(er.message, true); }
+  const held = F.list && F.list.trash > 0 ? ` The trash holds ${fsize(F.list.trash)} now, and this adds to it until you empty it (what is older than 30 days goes by itself).` : " Nothing is freed on the disk until the trash is emptied.";
+  confirmDialog(`Delete ${e.name}?`, "It goes to the trash, where you can bring it back or delete it for good." + held, "Move to trash", async () => {
+    try {
+      const r = await api("POST", fpath("/delete"), { paths: [p] });
+      if (r && r.failed && r.failed.length) toast(`${r.failed[0].path}: ${r.failed[0].why}.`, true); else toast("Moved to the trash.");
+      loadFiles(F.path);
+    } catch (er) { toast(er.message, true); }
   });
 }
 function unzipDialog(p) {

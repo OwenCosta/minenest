@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -270,9 +271,18 @@ func isUnder(dir, rel string) bool {
 
 // ------------------------------------------------------------------ while the server runs
 
+// levelOK says whether a level-name is one plain folder name inside the server's folder (not "",
+// not "..", with no folders in it). The world code backs up and removes whatever this names, so
+// nothing else is ever accepted.
+func levelOK(n string) bool {
+	c, err := cleanRel(n)
+	return err == nil && c != "" && c == n && !strings.Contains(n, "/")
+}
+
+// levelName is the world's folder name; an unusable level-name counts as the default.
 func (s *Server) levelName() string {
 	n := s.props().GetDefault("level-name", "world")
-	if c, err := cleanRel(n); err != nil || c == "" {
+	if !levelOK(n) {
 		return "world"
 	}
 	return n
@@ -409,7 +419,25 @@ var textExts = map[string]bool{"properties": true, "yml": true, "yaml": true, "j
 // blockedUpload: programs and scripts that run when opened on Windows. A server's folder has no
 // use for them, and they can't be uploaded or unpacked into it.
 var blockedUpload = map[string]bool{"exe": true, "com": true, "scr": true, "msi": true, "bat": true, "cmd": true,
-	"ps1": true, "vbs": true, "vbe": true, "wsf": true, "lnk": true, "hta": true, "cpl": true, "reg": true}
+	"ps1": true, "vbs": true, "vbe": true, "wsf": true, "lnk": true, "hta": true, "cpl": true, "reg": true,
+	"js": true, "jse": true, "wsh": true, "url": true, "pif": true, "msc": true, "scf": true, "inf": true,
+	"msp": true, "application": true, "appref-ms": true, "gadget": true, "psm1": true, "ps1xml": true, "psc1": true}
+
+// newFileWhy is the one place that says whether a file may be created under this name by
+// anything but the text editor (an upload, a move or copy to a new name, unpacking a zip,
+// putting something back). srcName is what it was called before ("" for something new): a program
+// that is already there can still be renamed, but a new one can't be made by renaming.
+// server.properties is only changed through the editor, where MineNest checks it.
+func newFileWhy(rel, srcName string) string {
+	name := path.Base(rel)
+	if ext := extOf(name); blockedUpload[ext] && ext != extOf(srcName) {
+		return "programs and scripts (." + ext + ") can't be put in a server's folder"
+	}
+	if lowerRel(rel) == "server.properties" {
+		return "changing server.properties is done by opening it in the editor, where MineNest checks it, not by putting a file over it"
+	}
+	return ""
+}
 
 func extOf(name string) string {
 	return strings.ToLower(strings.TrimPrefix(path.Ext(name), "."))
@@ -464,6 +492,9 @@ func (s *Server) FileList(rel string) (*FileList, error) {
 	if !t.exists() {
 		return nil, apiError{404, "there's no such folder"}
 	}
+	if t.isLink() {
+		return nil, fblocked("that is a link, and MineNest doesn't open what links point to")
+	}
 	if !t.isDir() {
 		return nil, fbad("that is a file, not a folder")
 	}
@@ -471,6 +502,7 @@ func (s *Server) FileList(rel string) (*FileList, error) {
 	if err != nil {
 		return nil, err
 	}
+	sweepDir(t.Abs, ents)
 	out := &FileList{Path: t.Rel, Entries: []FileEntry{}, Running: s.State() != Stopped, MaxUpload: maxUploadBytes, MaxEdit: maxEditBytes}
 	if f, err := diskFree(t.Abs); err == nil {
 		out.Free = f
@@ -926,6 +958,9 @@ func (s *Server) FileWrite(w WriteRequest) (*FileContent, error) {
 // comments and the order included, is the user's.
 func (s *Server) checkProperties(text string) (string, error) {
 	p := propertiesFromText(text)
+	if v, ok := p.Get("level-name"); ok && !levelOK(v) {
+		return "", fbad("the world's folder (level-name) has to be one plain folder name, like world")
+	}
 	cur := s.props()
 	if d := s.doorLocked(); d != nil {
 		for _, k := range []string{"server-port", "server-ip"} {
@@ -1004,6 +1039,11 @@ func (s *Server) FileMove(from, to string, overwrite bool) error {
 	if src.Rel == dst.Rel {
 		return fbad("that's where it already is")
 	}
+	if !src.isDir() {
+		if why := newFileWhy(dst.Rel, src.Name); why != "" {
+			return fbad("%s", why)
+		}
+	}
 	// A folder can't go inside itself (a change of capital letters only is fine).
 	if src.isDir() && isUnder(src.Rel, dst.Rel) && lowerRel(src.Rel) != lowerRel(dst.Rel) {
 		return fbad("a folder can't be moved into itself")
@@ -1028,7 +1068,7 @@ func (s *Server) FileMove(from, to string, overwrite bool) error {
 		}
 	}
 	if err := os.Rename(src.Abs, dst.Abs); err != nil {
-		return fmt.Errorf("it couldn't be moved (is something using it?): %v", err)
+		return fmt.Errorf("it couldn't be moved (is something using it?)")
 	}
 	return nil
 }
@@ -1062,6 +1102,11 @@ func (s *Server) FileCopy(from, to string, overwrite bool) (*CopyResult, error) 
 	}
 	if lowerRel(src.Rel) == lowerRel(dst.Rel) {
 		return nil, fbad("pick a different name for the copy")
+	}
+	if !src.isDir() {
+		if why := newFileWhy(dst.Rel, src.Name); why != "" {
+			return nil, fbad("%s", why)
+		}
 	}
 	if why := s.liveBlock(dst.Rel, src.isDir(), false, false); why != "" {
 		return nil, fblocked("%s", why)
@@ -1251,9 +1296,6 @@ func (s *Server) FileUpload(dir, name string, size int64, overwrite bool, body i
 	if err := checkComponent(name); err != nil {
 		return nil, err
 	}
-	if blockedUpload[extOf(name)] {
-		return nil, fbad("programs and scripts (.%s) can't be uploaded to a server's folder", extOf(name))
-	}
 	d, err := s.target(dir)
 	if err != nil {
 		return nil, err
@@ -1264,6 +1306,9 @@ func (s *Server) FileUpload(dir, name string, size int64, overwrite bool, body i
 	t, err := s.target(joinRel(d.Rel, name))
 	if err != nil {
 		return nil, err
+	}
+	if why := newFileWhy(t.Rel, ""); why != "" {
+		return nil, fbad("%s", why)
 	}
 	if t.isLink() || (t.exists() && !t.isFile()) {
 		return nil, fbad("%q is in the way and isn't a plain file", name)
@@ -1280,8 +1325,14 @@ func (s *Server) FileUpload(dir, name string, size int64, overwrite bool, body i
 	if size > maxUploadBytes {
 		return nil, ftoobig("that file is %s, more than the %s MineNest takes at once", humanSize(size), humanSize(maxUploadBytes))
 	}
-	if size > 0 {
-		if err := s.roomFor(t.Abs, size); err != nil {
+	// An upload that doesn't say its length (chunked) is made room for as if it were the most
+	// MineNest takes, and is held to that.
+	room := size
+	if room < 0 {
+		room = maxUploadBytes
+	}
+	if room > 0 {
+		if err := s.roomFor(t.Abs, room); err != nil {
 			return nil, err
 		}
 	}
@@ -1337,4 +1388,60 @@ func (s *Server) FileUpload(dir, name string, size int64, overwrite bool, body i
 		return nil, fmt.Errorf("the file couldn't be put in place: %v", err)
 	}
 	return &UploadResult{Path: t.Rel, Size: written, Restart: needsRestart(t.Rel), Running: s.State() != Stopped}, nil
+}
+
+// ------------------------------------------------------------------ leftovers
+
+// tempMaxAge is how old one of MineNest's temporary names has to be before it is a leftover (a
+// crash in the middle of an upload or an unpack), not something still being written.
+var tempMaxAge = time.Hour
+
+func leftover(name string, mod time.Time) bool {
+	if !internalName(name) || time.Since(mod) < tempMaxAge {
+		return false
+	}
+	for _, p := range []string{"up-", "unzip-", "copy-"} {
+		if strings.HasPrefix(name, internalPrefix+p) {
+			return true
+		}
+	}
+	return false
+}
+
+// sweepDir removes the leftovers directly in one folder.
+func sweepDir(dir string, ents []os.DirEntry) {
+	for _, e := range ents {
+		if !internalName(e.Name()) {
+			continue
+		}
+		if fi, err := e.Info(); err == nil && leftover(e.Name(), fi.ModTime()) {
+			safeRemoveAll(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+// sweepTemp looks through a server's folders for leftovers. It runs when MineNest starts.
+func (s *Server) sweepTemp() {
+	if s.State() != Stopped {
+		return
+	}
+	n := 0
+	filepath.WalkDir(s.Root(), func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		if n++; n > 20000 {
+			return fs.SkipAll
+		}
+		if internalName(d.Name()) {
+			if fi, err := d.Info(); err == nil && leftover(d.Name(), fi.ModTime()) {
+				safeRemoveAll(p)
+			}
+			return fs.SkipDir
+		}
+		if ents, err := os.ReadDir(p); err == nil {
+			sweepDir(p, ents)
+		}
+		return nil
+	})
 }

@@ -101,6 +101,15 @@ async function refresh() {
   S.status = S.servers.find((s) => s.id === S.cur);
   show("server");
   renderHead();
+  // A backup the schedule starts or finishes isn't one this window began: pick it up from the
+  // server's busy state, and bring the World page up to date.
+  const busy = `${S.cur}:${S.status.busy || ""}`;
+  if (S.busyWas !== busy) {
+    const first = S.busyWas === undefined;
+    S.busyWas = busy;
+    if (S.status.busy) api("GET", "/api/info").then((i) => { for (const j of i.jobs) if (!j.finished) watchJob(j.id); }).catch(() => {});
+    else if (!first && S.tab === "world") renderTab(true);
+  }
   if (S.tab === "overview" || S.tab === "internet") renderTab(false);
 }
 function show(which) { for (const id of ["empty", "server", "create", "account"]) $(id).classList.toggle("hidden", id !== which); }
@@ -260,7 +269,14 @@ async function tabAddons(s, full) {
   };
   q.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
   const file = h("input", { type: "file", accept: ".jar,.zip", class: "hidden", onchange: async () => {
-    for (const f of file.files) await act(() => api("POST", sp("/addons/upload?name=" + encodeURIComponent(f.name)), f, true), "Added " + f.name);
+    for (const f of file.files) {
+      const put = (over) => api("POST", sp("/addons/upload?name=" + encodeURIComponent(f.name) + (over ? "&overwrite=1" : "")), f, true);
+      try { await put(false); toast("Added " + f.name); refresh(); } catch (e) {
+        if (e.status !== 409) { toast(e.message, true); continue; }
+        if (await askDialog(`Replace ${f.name}?`, "It is already there. The old one goes to the trash.", "Replace")) await act(() => put(true), "Replaced " + f.name);
+      }
+    }
+    file.value = "";
     tabAddons(S.status, true);
   } });
   fill(el,
@@ -465,10 +481,10 @@ async function tabWorld(s, full) {
     section("Backups", "MineNest also makes one before anything that could hurt the world",
       h("div", { class: "row" }, h("button", { class: "btn primary", disabled: !r.world, onclick: () => act(() => api("POST", sp("/backups"))) }, "Back up now"),
         !r.world ? h("span", { class: "muted" }, "There's no world yet: start the server once.") : null),
-      h("p", { class: "muted small" }, `${r.backups.length ? `Backups use ${size(r.used)}.` : ""}${r.free >= 0 ? ` ${size(r.free)} is free on this disk.` : ""}`.trim()),
+      h("p", { class: "muted small" }, `${r.backups.length ? `Backups use ${size(r.used)}.` : ""}${r.trash > 0 ? ` The trash in Files holds ${size(r.trash)}.` : ""}${r.free >= 0 ? ` ${size(r.free)} is free on this disk.` : ""}`.trim()),
       h("div", { class: "mt" }, r.backups.length ? r.backups.map((b) => h("div", { class: "list-row" },
-        h("div", { class: "grow" }, h("b", {}, new Date(b.time * 1000).toLocaleString()), h("span", { class: "muted" }, `  ${size(b.size)}, ${b.why}${b.keep ? ", kept" : ""}`)),
-        b.why !== "Made by hand" ? h("button", { class: "btn small", title: b.keep ? "MineNest may delete it again when it's among the oldest" : "MineNest never deletes a kept backup by itself", onclick: () => act(() => api("POST", sp(`/backups/${encodeURIComponent(b.name)}/keep`), { keep: !b.keep }), b.keep ? "It's no longer kept." : "Kept. MineNest won't delete it.").then(again) }, b.keep ? "Don't keep" : "Keep") : null,
+        h("div", { class: "grow" }, h("b", {}, when(b.time)), h("span", { class: "muted" }, `  ${size(b.size)}, ${b.why}${b.keep ? ", kept" : ""}`)),
+        b.why !== "Made by hand" ? h("button", { class: "btn small", title: b.keep ? "Nothing is deleted now: it goes later, when newer ones push it out" : "MineNest never deletes a kept backup by itself", onclick: () => act(() => api("POST", sp(`/backups/${encodeURIComponent(b.name)}/keep`), { keep: !b.keep }), b.keep ? "It's no longer kept. It goes when newer ones push it out." : "Kept. MineNest won't delete it.").then(again) }, b.keep ? "Don't keep" : "Keep") : null,
         h("button", { class: "btn small", disabled: s.state !== "stopped", onclick: () => confirmDialog("Put this backup back?", "The world as it is now is backed up first, so nothing is lost.", "Put it back", () => act(() => api("POST", sp(`/backups/${encodeURIComponent(b.name)}/restore`)))) }, "Put back"),
         h("button", { class: "btn small danger", onclick: () => confirmDialog("Delete this backup?", "It can't be brought back.", "Delete", () => act(() => api("DELETE", sp(`/backups/${encodeURIComponent(b.name)}`)), "Deleted.").then(again)) }, "Delete"))) : h("p", { class: "muted" }, "No backups yet."))),
     section("A new world", "the old one is backed up, then removed",
@@ -501,7 +517,7 @@ function autoBackupSection(a, when, again) {
       h("label", {}, "How often"), every,
       hoursRow, timeRow,
       h("label", {}, "Keep the newest"), h("div", { style: "width:90px" }, keep),
-      h("div", { class: "help" }, "Older automatic ones are deleted. Backups made by hand or marked to keep are never deleted. When nobody has played since the last one, or the disk is nearly full, MineNest skips one and says why."),
+      h("div", { class: "help" }, "Older automatic ones are deleted, and lowering this number deletes the extra ones right away. Backups made by hand or marked to keep are never deleted. When nobody has played since the last one, or the disk is nearly full, MineNest skips one and says why."),
       h("label", {}, "The last one"), h("span", {}, last),
       h("label", {}, "The next one"), h("span", {}, next)),
     h("div", { class: "row mt" }, h("button", { class: "btn primary", onclick: save }, "Save")));
@@ -586,6 +602,12 @@ function confirmDialog(title, text, okText, fn) {
   modal(h("h2", {}, title), h("p", {}, text), h("div", { class: "modal-actions" },
     h("button", { class: "btn", onclick: closeModal }, "Cancel"),
     h("button", { class: "btn primary", onclick: () => { closeModal(); fn(); } }, okText)));
+}
+// askDialog is confirmDialog for code that waits for the answer (true, or false for Cancel).
+function askDialog(title, text, okText) {
+  return new Promise((done) => modal(h("h2", {}, title), h("p", {}, text), h("div", { class: "modal-actions" },
+    h("button", { class: "btn", onclick: () => { closeModal(); done(false); } }, "Cancel"),
+    h("button", { class: "btn primary", onclick: () => { closeModal(); done(true); } }, okText))));
 }
 function eulaDialog() {
   const box = h("input", { type: "checkbox" });

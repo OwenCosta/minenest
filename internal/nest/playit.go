@@ -59,14 +59,15 @@ type playitAgent struct {
 	tunnelErr map[string]string // why playit.gg didn't make a tunnel, by kind:port
 
 	// The agent itself.
-	cmd       *exec.Cmd
-	started   time.Time
-	connected bool
-	tail      []string // its last lines, secrets taken out
-	fails     int      // stops in a row without connecting
-	lastExit  time.Time
-	diag      *playitDiag // why it stopped or isn't connecting
-	checks    map[*Server]wayCheck
+	cmd        *exec.Cmd
+	started    time.Time
+	connected  bool
+	tail       []string // its last lines, secrets taken out
+	fails      int      // stops in a row without connecting
+	lastExit   time.Time
+	diag       *playitDiag // why it stopped or isn't connecting
+	checks     map[*Server]wayCheck
+	newerCheck bool // look for a newer agent at the next start, whatever the last look said
 }
 
 type wayCheck struct {
@@ -540,9 +541,32 @@ func (p *playitAgent) ensureAgent(ctx context.Context) (time.Duration, error) {
 	p.mu.Lock()
 	running := p.cmd != nil
 	fails, lastExit, diag := p.fails, p.lastExit, p.diag
+	forceCheck := p.newerCheck
 	p.mu.Unlock()
 	if running {
+		// An agent that stays up for days is looked over once a day: when playit.gg has a newer
+		// one, it is stopped, and the next start fetches the new one.
+		var rec agentRecord
+		readJSON(p.recordPath(), &rec)
+		if rec.SHA256 != "" && time.Since(rec.Checked) > 24*time.Hour {
+			if rel, err := latestPlayitAgent(ctx, true); err == nil {
+				rec.Checked = time.Now()
+				writeJSON(p.recordPath(), rec, 0o644)
+				if rel.Tag != rec.Tag {
+					p.mu.Lock()
+					p.newerCheck = true
+					p.mu.Unlock()
+					p.stopAgent()
+					p.poke()
+				}
+			}
+		}
 		return 0, nil
+	}
+	if forceCheck {
+		p.mu.Lock()
+		p.newerCheck = false
+		p.mu.Unlock()
 	}
 	if fails > 0 {
 		if wait := playitBackoff(fails) - time.Since(lastExit); wait > 0 {
@@ -568,8 +592,8 @@ func (p *playitAgent) ensureAgent(ctx context.Context) (time.Duration, error) {
 	default:
 		if sum, err := fileHash(bin, "sha256"); err != nil || !strings.EqualFold(sum, rec.SHA256) {
 			fresh = "playit.gg's agent had changed on disk (an antivirus or a broken download), so MineNest downloads it again."
-		} else if time.Since(rec.Checked) > 24*time.Hour {
-			if rel, err := latestPlayitAgent(ctx); err == nil {
+		} else if forceCheck || time.Since(rec.Checked) > 24*time.Hour {
+			if rel, err := latestPlayitAgent(ctx, true); err == nil {
 				rec.Checked = time.Now()
 				writeJSON(p.recordPath(), rec, 0o644)
 				if rel.Tag != rec.Tag {
@@ -580,7 +604,7 @@ func (p *playitAgent) ensureAgent(ctx context.Context) (time.Duration, error) {
 	}
 	if fresh != "" {
 		p.set("starting", fresh)
-		if err := p.download(ctx, bin); err != nil {
+		if err := p.download(ctx, bin, forceCheck); err != nil {
 			return 30 * time.Second, err
 		}
 	}
@@ -615,6 +639,7 @@ func (p *playitAgent) startAgent(bin string) (time.Duration, error) {
 		p.mu.Unlock()
 		if d.Redownload {
 			os.Remove(bin)
+			os.Remove(p.recordPath()) // so the next start says "downloading", not "missing"
 		}
 		return playitBackoff(p.fails), errors.New(d.Note)
 	}
@@ -733,6 +758,7 @@ func (p *playitAgent) restart() {
 	p.stopAgent()
 	p.mu.Lock()
 	p.fails, p.diag, p.tail = 0, nil, nil
+	p.newerCheck = true // Try again also looks for a newer agent, as the message about an old one says
 	p.creating = map[string]time.Time{}
 	p.tunnelErr = map[string]string{}
 	p.checks = map[*Server]wayCheck{}
@@ -804,20 +830,26 @@ func playitdTag(tag string) bool {
 	return err == nil && n >= 1
 }
 
-func latestPlayitAgent(ctx context.Context) (playitRelease, error) {
+// latestPlayitAgent is the newest agent for this computer. The list of releases is kept for an
+// hour, unless fresh asks for a new look.
+func latestPlayitAgent(ctx context.Context, fresh bool) (playitRelease, error) {
 	want := playitAsset(runtime.GOOS, runtime.GOARCH)
 	if want == "" {
 		return playitRelease{}, fmt.Errorf("playit.gg has no agent for this computer")
 	}
 	var rels []playitGHRelease
-	if err := getJSON(ctx, playitReleases, time.Hour, &rels); err != nil {
+	age := time.Hour
+	if fresh {
+		age = 0
+	}
+	if err := getJSON(ctx, playitReleases, age, &rels); err != nil {
 		return playitRelease{}, err
 	}
 	return pickPlayitRelease(rels, want)
 }
 
-func (p *playitAgent) download(ctx context.Context, bin string) error {
-	rel, err := latestPlayitAgent(ctx)
+func (p *playitAgent) download(ctx context.Context, bin string, fresh bool) error {
+	rel, err := latestPlayitAgent(ctx, fresh)
 	if err != nil {
 		return err
 	}

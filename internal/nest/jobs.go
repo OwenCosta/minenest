@@ -3,6 +3,7 @@ package nest
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -103,6 +104,18 @@ func (l *jobList) start(title, server string, run func(ctx context.Context, j *J
 		j.mu.Unlock()
 	}()
 	return j
+}
+
+// cancelBackups stops the backups that are running (their titles start with the word Backing up
+// or Automatic backup).
+func (l *jobList) cancelBackups() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, j := range l.jobs {
+		if !j.Finished && j.cancel != nil && (strings.HasPrefix(j.Title, "Backing up") || strings.HasPrefix(j.Title, "Automatic backup")) {
+			j.cancel()
+		}
+	}
 }
 
 func (l *jobList) get(id string) *Job {

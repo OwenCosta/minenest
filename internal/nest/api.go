@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -153,6 +154,51 @@ func (a *api) wrap(h handler) http.HandlerFunc {
 	}
 }
 
+// reasonOf is the plain reason inside a file system error, without the path it carries.
+func reasonOf(err error) string {
+	var pe *fs.PathError
+	var le *os.LinkError
+	var inner error
+	switch {
+	case errors.As(err, &pe):
+		inner = pe.Err
+	case errors.As(err, &le):
+		inner = le.Err
+	default:
+		inner = err
+	}
+	switch {
+	case errors.Is(inner, fs.ErrNotExist):
+		return "it isn't there"
+	case errors.Is(inner, fs.ErrPermission):
+		return "it isn't allowed, or something is using it"
+	}
+	r := strings.TrimSuffix(strings.TrimSpace(inner.Error()), ".")
+	if r != "" {
+		r = strings.ToLower(r[:1]) + r[1:]
+	}
+	return r
+}
+
+// plainMessage is what an error says, with the paths on this computer taken out: file system
+// errors carry the full path, which other computers have no business seeing.
+func plainMessage(err error) string {
+	msg := err.Error()
+	var pe *fs.PathError
+	var le *os.LinkError
+	switch {
+	case errors.As(err, &pe):
+		msg = strings.Replace(msg, pe.Error(), reasonOf(pe), 1)
+	case errors.As(err, &le):
+		msg = strings.Replace(msg, le.Error(), reasonOf(le), 1)
+	}
+	home := Home()
+	for _, h := range []string{home + string(os.PathSeparator), filepath.ToSlash(home) + "/"} {
+		msg = strings.ReplaceAll(msg, h, "")
+	}
+	return msg
+}
+
 func writeErr(w http.ResponseWriter, err error) {
 	code := 400
 	var ae apiError
@@ -162,7 +208,7 @@ func writeErr(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
-	msg := err.Error()
+	msg := plainMessage(err)
 	if msg != "" {
 		msg = strings.ToUpper(msg[:1]) + msg[1:]
 		if !strings.HasSuffix(msg, ".") && !strings.HasSuffix(msg, "?") && !strings.HasSuffix(msg, ")") {
@@ -356,6 +402,11 @@ func (a *api) routes() http.Handler {
 		if err := body(r, &o); err != nil {
 			return nil, err
 		}
+		// Java's own arguments can load a program (-javaagent:, -XX:OnError=), so they are set on
+		// this computer only, whatever "Let other computers change files" says.
+		if o.JVMArgs != nil && fromElsewhere(r) {
+			return nil, apiError{403, "Java arguments can only be changed on the computer MineNest runs on"}
+		}
 		if o.RAM != nil && (*o.RAM < 512 || (totalMemoryMB() > 0 && *o.RAM > totalMemoryMB())) {
 			return nil, bad("memory has to be between 512 MB and what this computer has (%d MB)", totalMemoryMB())
 		}
@@ -483,8 +534,8 @@ func (a *api) routes() http.Handler {
 		}
 		p := s.props()
 		for k, v := range set {
-			if k == "" || strings.ContainsAny(k, "=:\n #") || strings.Contains(v, "\n") {
-				return nil, bad("%q can't be set", k)
+			if err := checkPropertySet(k, v); err != nil {
+				return nil, err
 			}
 			if k == "server-port" {
 				n, err := strconv.Atoi(v)
@@ -547,7 +598,7 @@ func (a *api) routes() http.Handler {
 			return nil, err
 		}
 		used, free := s.BackupSpace()
-		return map[string]any{"backups": s.Backups(), "world": s.WorldExists(), "auto": a.m.AutoStatus(s), "used": used, "free": free}, nil
+		return map[string]any{"backups": s.Backups(), "world": s.WorldExists(), "auto": a.m.AutoStatus(s), "used": used, "free": free, "trash": s.trashSize()}, nil
 	})
 	h("PUT /api/servers/{id}/backups/auto", func(r *http.Request) (any, error) {
 		s, err := a.server(r)
@@ -632,6 +683,9 @@ func (a *api) routes() http.Handler {
 		if err != nil {
 			return nil, err
 		}
+		if err := a.m.filesChangeAllowed(r); err != nil { // a plugin or mod is a program: same rule as the Files tab
+			return nil, err
+		}
 		var o struct{ Project string }
 		body(r, &o)
 		if o.Project == "" {
@@ -648,8 +702,14 @@ func (a *api) routes() http.Handler {
 		if err != nil {
 			return nil, err
 		}
-		r.Body = http.MaxBytesReader(nil, r.Body, 512<<20)
-		return nil, s.AddAddonFile(r.URL.Query().Get("name"), r.Body)
+		if r.ContentLength > maxUploadBytes {
+			return nil, ftoobig("that file is %s, more than the %s MineNest takes at once", humanSize(r.ContentLength), humanSize(maxUploadBytes))
+		}
+		if err := webUploadWhy(r); err != nil {
+			return nil, err
+		}
+		r.Body = http.MaxBytesReader(nil, r.Body, maxUploadBytes+1)
+		return nil, s.AddAddonFile(r.URL.Query().Get("name"), r.ContentLength, r.URL.Query().Get("overwrite") == "1", r.Body)
 	})
 	h("POST /api/servers/{id}/addons/check", func(r *http.Request) (any, error) {
 		s, err := a.server(r)
@@ -661,6 +721,9 @@ func (a *api) routes() http.Handler {
 	h("POST /api/servers/{id}/addons/update", func(r *http.Request) (any, error) {
 		s, err := a.server(r)
 		if err != nil {
+			return nil, err
+		}
+		if err := a.m.filesChangeAllowed(r); err != nil {
 			return nil, err
 		}
 		var o struct{ Project string }

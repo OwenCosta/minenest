@@ -46,7 +46,8 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
 
   minenest files ls|cat|put|get|mkdir|mv|cp|rm|unzip|trash [-s SERVER]
                                         the server's own files: look, upload, download, change.
-                                        rm only moves to the trash (minenest files for the rest)
+                                        rm only moves to the trash, which empties what is over 30 days old
+                                        (minenest files for the rest)
 
   minenest import FOLDER [--name NAME] [-t TYPE] [-v VERSION]
                                         bring in a server you already have (it's copied)
@@ -635,7 +636,7 @@ func status(c *client, ref string) error {
 	if s.Modpack != "" {
 		fmt.Printf("  %-14s %s\n", "Modpack", s.Modpack)
 	}
-	mem := fmt.Sprintf("%d MB", s.RAM)
+	mem := gb(s.RAM)
 	if s.MemUsedMB > 0 {
 		mem += ", using " + gb(s.MemUsedMB) + " now"
 	}
@@ -1268,8 +1269,8 @@ func backupMore(c *client, f flags) error {
 	}
 	if k := f.vals["keep"]; k != "" {
 		n, err := strconv.Atoi(k)
-		if err != nil || n < 1 {
-			return fmt.Errorf("--keep wants a number, like --keep 10")
+		if err != nil || n < 1 || n > 1000 {
+			return fmt.Errorf("--keep wants a number from 1 to 1000, like --keep 10")
 		}
 		a.Keep, changed = n, true
 	}

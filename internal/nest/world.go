@@ -36,7 +36,7 @@ func (s *Server) backupDir() string { return filepath.Join(s.Dir, "backups") }
 
 // worldFolders are the world's folders: level-name, and Bukkit's _nether and _the_end beside it.
 func (s *Server) worldFolders() []string {
-	level := s.props().GetDefault("level-name", "world")
+	level := s.levelName()
 	var out []string
 	for _, suffix := range []string{"", "_nether", "_the_end"} {
 		name := level + suffix
@@ -47,12 +47,37 @@ func (s *Server) worldFolders() []string {
 	return out
 }
 
+// removeWorldFolder deletes one folder of the world. It only ever removes a plain folder that
+// sits directly in the server's folder: never a link, and never anything a name like ".." could
+// reach.
+func (s *Server) removeWorldFolder(name string) error {
+	if checkComponent(name) != nil {
+		return fmt.Errorf("%q isn't a folder MineNest will remove", name)
+	}
+	p := filepath.Join(s.Root(), name)
+	if !samePath(filepath.Dir(p), filepath.Clean(s.Root())) {
+		return fmt.Errorf("%q isn't a folder MineNest will remove", name)
+	}
+	st, err := os.Lstat(p)
+	if err != nil {
+		return nil // nothing there to remove
+	}
+	if isLinkMode(st.Mode()) {
+		return fmt.Errorf("%q is a link, so MineNest leaves it alone", name)
+	}
+	return safeRemoveAll(p)
+}
+
 func (s *Server) WorldExists() bool { return len(s.worldFolders()) > 0 }
 
 // Backup makes a backup in a job. While the server runs, saving is paused so the files are whole.
 func (m *Manager) Backup(s *Server, why string) (*Job, error) {
 	if err := s.setBusy("a backup", false); err != nil {
 		return nil, err
+	}
+	if st := s.State(); st == Starting || st == Stopping {
+		s.setBusy("", false)
+		return nil, fmt.Errorf("wait until the server has finished %s, then back up", st)
 	}
 	return m.Jobs.start("Backing up "+s.Config().Name, s.ID, func(ctx context.Context, j *Job) (any, error) {
 		defer s.setBusy("", false)
@@ -153,11 +178,14 @@ func (s *Server) backupLocked(ctx context.Context, why string, j *Job) (*Backup,
 		return nil, fmt.Errorf("the backup failed: %v", err)
 	}
 	fp := s.worldPrint()
+	// The note goes first: a backup is only listed once its zip is in place, and then it already
+	// says why it was made.
+	os.WriteFile(dest+".txt", []byte(why+"\n"), 0o644)
 	if err := os.Rename(part, dest); err != nil {
 		os.Remove(part)
+		os.Remove(dest + ".txt")
 		return nil, fmt.Errorf("the backup failed: %v", err)
 	}
-	os.WriteFile(dest+".txt", []byte(why+"\n"), 0o644)
 	st, _ := os.Stat(dest)
 	b := &Backup{Name: name, Why: why, Time: time.Now().Unix(), Auto: why == autoWhy, print: fp}
 	if st != nil {
@@ -182,7 +210,14 @@ func (s *Server) Backups() []Backup {
 		why, keep := s.backupNote(e.Name())
 		out = append(out, Backup{Name: e.Name(), Size: info.Size(), Time: info.ModTime().Unix(), Why: why, Auto: why == autoWhy, Keep: keep})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name > out[j].Name })
+	// Newest first by when the file was written, not by its name: the name is local time, which
+	// goes back an hour when the clocks change.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Time != out[j].Time {
+			return out[i].Time > out[j].Time
+		}
+		return out[i].Name > out[j].Name
+	})
 	return out
 }
 
@@ -214,9 +249,8 @@ func (s *Server) KeepBackup(name string, keep bool) error {
 	if err := writeFile(p+".txt", []byte(text), 0o644); err != nil {
 		return err
 	}
-	if !keep {
-		s.pruneBackups()
-	}
+	// Nothing is pruned here: one that is let go stays until the next backup is made, so
+	// clicking "Don't keep" never deletes anything by itself.
 	return nil
 }
 
@@ -290,7 +324,9 @@ func (m *Manager) Restore(s *Server, name string) (*Job, error) {
 		entries, _ := os.ReadDir(tmp)
 		for _, e := range entries {
 			target := filepath.Join(s.Root(), e.Name())
-			os.RemoveAll(target)
+			if err := s.removeWorldFolder(e.Name()); err != nil {
+				return nil, err
+			}
 			if err := os.Rename(filepath.Join(tmp, e.Name()), target); err != nil {
 				return nil, err
 			}
@@ -314,7 +350,7 @@ func (m *Manager) ResetWorld(s *Server, seed string) (*Job, error) {
 			}
 		}
 		for _, f := range s.worldFolders() {
-			if err := os.RemoveAll(filepath.Join(s.Root(), f)); err != nil {
+			if err := s.removeWorldFolder(f); err != nil {
 				return nil, err
 			}
 		}

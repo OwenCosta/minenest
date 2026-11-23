@@ -15,15 +15,36 @@ import (
 
 type elsewhereKey struct{}
 
+// The two ways in from another computer.
+const (
+	doorLAN = "lan" // the home network: answers stream
+	doorWeb = "web" // the website: a whole answer is held in memory and passed on in one piece
+)
+
 // fromElsewhere reports whether a request came in through the home-network door or the website
 // (remote.go marks those when it passes them on), not from this computer.
 func fromElsewhere(r *http.Request) bool {
-	v, _ := r.Context().Value(elsewhereKey{}).(bool)
-	return v
+	v, _ := r.Context().Value(elsewhereKey{}).(string)
+	return v != ""
 }
 
-func markElsewhere(r *http.Request) *http.Request {
-	return r.Clone(context.WithValue(r.Context(), elsewhereKey{}, true))
+// fromWeb reports whether it came through the website's door.
+func fromWeb(r *http.Request) bool {
+	v, _ := r.Context().Value(elsewhereKey{}).(string)
+	return v == doorWeb
+}
+
+func markElsewhere(r *http.Request, door string) *http.Request {
+	return r.Clone(context.WithValue(r.Context(), elsewhereKey{}, door))
+}
+
+// webUploadWhy says why an upload can't come through the website: the whole file travels inside
+// a polled message, so only small ones do.
+func webUploadWhy(r *http.Request) error {
+	if fromWeb(r) && r.ContentLength > remoteSendLimit {
+		return ftoobig("that file is %s, more than the %s that can be sent through the website. Use the home network, or the computer MineNest runs on", humanSize(r.ContentLength), humanSize(remoteSendLimit))
+	}
+	return nil
 }
 
 const remoteFilesOff = "Changing files from another computer is turned off. On the computer MineNest runs on, open Settings and turn on \"Let other computers change files\""
@@ -37,14 +58,25 @@ func (m *Manager) filesChangeAllowed(r *http.Request) error {
 	return nil
 }
 
-// A download to another computer is held in memory on its way, so it has a ceiling.
-var remoteSendLimit int64 = 256 << 20
+// An answer through the website is held in memory on its way (and the relay will not take a big
+// one), so a download through it has a ceiling. The home network streams, so it has none.
+var remoteSendLimit int64 = 16 << 20
+
+// sendLimit is the most a download to this request may be (0: no limit).
+func sendLimit(r *http.Request) int64 {
+	if fromWeb(r) {
+		return remoteSendLimit
+	}
+	return 0
+}
 
 type fileListReply struct {
 	*FileList
 	CanChange bool   `json:"can_change"`
 	Why       string `json:"why,omitempty"`
 	Elsewhere bool   `json:"elsewhere"`
+	Web       bool   `json:"web"`   // through the website: big downloads and uploads don't work
+	Trash     int64  `json:"trash"` // what the trash holds, so a delete can say how much it adds to
 }
 
 func (a *api) fileRoutes(mux *http.ServeMux, h func(string, handler)) {
@@ -79,7 +111,10 @@ func (a *api) fileRoutes(mux *http.ServeMux, h func(string, handler)) {
 		if err != nil {
 			return nil, err
 		}
-		rep := fileListReply{FileList: l, CanChange: true, Elsewhere: fromElsewhere(r)}
+		rep := fileListReply{FileList: l, CanChange: true, Elsewhere: fromElsewhere(r), Web: fromWeb(r), Trash: s.trashSize()}
+		if rep.Web {
+			l.MaxUpload = min(l.MaxUpload, remoteSendLimit)
+		}
 		if err := a.m.filesChangeAllowed(r); err != nil {
 			rep.CanChange, rep.Why = false, err.Error()
 		}
@@ -111,6 +146,9 @@ func (a *api) fileRoutes(mux *http.ServeMux, h func(string, handler)) {
 		if r.ContentLength > maxUploadBytes {
 			return nil, ftoobig("that file is %s, more than the %s MineNest takes at once", humanSize(r.ContentLength), humanSize(maxUploadBytes))
 		}
+		if err := webUploadWhy(r); err != nil {
+			return nil, err
+		}
 		r.Body = http.MaxBytesReader(nil, r.Body, maxUploadBytes+1)
 		return s.FileUpload(q(r, "dir"), q(r, "name"), r.ContentLength, q(r, "overwrite") == "1", r.Body)
 	})
@@ -124,7 +162,7 @@ func (a *api) fileRoutes(mux *http.ServeMux, h func(string, handler)) {
 			return err
 		}
 		defer f.Close()
-		if fromElsewhere(r) && fi.Size() > remoteSendLimit {
+		if lim := sendLimit(r); lim > 0 && fi.Size() > lim {
 			return errTooMuch
 		}
 		attachment(w, name)
@@ -141,8 +179,7 @@ func (a *api) fileRoutes(mux *http.ServeMux, h func(string, handler)) {
 			return err
 		}
 		var limit int64
-		if fromElsewhere(r) {
-			limit = remoteSendLimit
+		if limit = sendLimit(r); limit > 0 {
 			if t.isDir() {
 				if size, _ := sizeOf(t.Abs, t.Info); size > limit {
 					return errTooMuch
@@ -162,7 +199,7 @@ func (a *api) fileRoutes(mux *http.ServeMux, h func(string, handler)) {
 		attachment(w, name+".zip")
 		w.Header().Set("Content-Type", "application/zip")
 		_, err = s.FileZip(t.Rel, w, limit)
-		if err != nil && !fromElsewhere(r) {
+		if err != nil && !fromWeb(r) {
 			panic(http.ErrAbortHandler) // a zip that stops halfway must not look finished
 		}
 		return nil
@@ -215,11 +252,11 @@ func (a *api) fileRoutes(mux *http.ServeMux, h func(string, handler)) {
 		if err := body(r, &o); err != nil {
 			return nil, err
 		}
-		ids, err := s.FileDelete(o.Paths)
+		res, err := s.FileDelete(o.Paths)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"trashed": len(ids)}, nil
+		return map[string]any{"trashed": len(res.Trashed), "failed": res.Failed}, nil
 	})
 	h("POST "+base+"/unzip", func(r *http.Request) (any, error) {
 		s, err := srv(r, true)

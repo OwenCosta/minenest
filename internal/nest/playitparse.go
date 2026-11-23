@@ -92,7 +92,7 @@ func agentEvent(line string) string {
 
 var (
 	longHexRe   = regexp.MustCompile(`[0-9a-fA-F]{32,}`)
-	secretKeyRe = regexp.MustCompile(`(?i)(secret[_ -]?key\s*[=:]\s*|Agent-Key\s+)\S+`)
+	secretKeyRe = regexp.MustCompile(`(?i)(secret[_ -]?key["']?\s*[=:]\s*["']?|Agent-Key:?\s+["']?)[^\s"']+`)
 )
 
 // cleanAgentLine makes one of the agent's lines fit to keep and show: no colours, no secrets.

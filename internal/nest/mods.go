@@ -83,7 +83,7 @@ func (s *Server) flavor() (Flavor, *Installed, error) {
 
 func (s *Server) addonFolder(f Flavor) string {
 	if f.AddonKind == "datapack" {
-		return filepath.Join(s.Root(), s.props().GetDefault("level-name", "world"), "datapacks")
+		return filepath.Join(s.Root(), s.levelName(), "datapacks")
 	}
 	return filepath.Join(s.Root(), f.AddonFolder)
 }
@@ -450,8 +450,10 @@ func (m *Manager) UpdateAddons(s *Server, ref string) (*Job, error) {
 	}), nil
 }
 
-// AddAddonFile puts a jar or zip the user chose into the add-ons folder.
-func (s *Server) AddAddonFile(name string, r io.Reader) error {
+// AddAddonFile puts a jar or zip the user chose into the add-ons folder. It goes through the
+// file manager's upload, so it has the same rules: a safe name, nothing replaced unless asked
+// (the old one goes to the trash), nothing changed under a running server, room checked first.
+func (s *Server) AddAddonFile(name string, size int64, overwrite bool, r io.Reader) error {
 	f, _, err := s.flavor()
 	if err != nil {
 		return err
@@ -461,19 +463,16 @@ func (s *Server) AddAddonFile(name string, r io.Reader) error {
 	if !strings.HasSuffix(low, ".jar") && !strings.HasSuffix(low, ".zip") {
 		return fmt.Errorf("only .jar and .zip files go in %s", f.AddonFolder)
 	}
-	dest := filepath.Join(s.addonFolder(f), name)
-	os.MkdirAll(filepath.Dir(dest), 0o755)
-	out, err := os.Create(dest + ".part")
+	rel, err := filepath.Rel(s.Root(), s.addonFolder(f))
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(out, io.LimitReader(r, 512<<20))
-	out.Close()
-	if err != nil {
-		os.Remove(dest + ".part")
+	rel = filepath.ToSlash(rel)
+	if err := s.ensureDirs(rel); err != nil {
 		return err
 	}
-	return os.Rename(dest+".part", dest)
+	_, err = s.FileUpload(rel, name, size, overwrite, r)
+	return err
 }
 
 // ------------------------------------------------------------------ modpacks

@@ -180,15 +180,30 @@ func (m *Manager) applyRemote() {
 	}
 }
 
+// localOnly says which requests are for this computer only, however they arrive: stopping or
+// updating MineNest, its remote settings, and signing the account in or out (which would point
+// the website door at another account). Changing a server's start-up arguments, importing from a
+// folder and looking through folders are held back in their own handlers (api.go).
+func localOnly(method, p string) bool {
+	switch {
+	case p == "/api/shutdown", p == "/open", p == "/api/playit/forget":
+		return true
+	case strings.HasPrefix(p, "/api/remote"), strings.HasPrefix(p, "/api/account/"):
+		return true
+	case p == "/api/update":
+		return method != http.MethodGet
+	}
+	return false
+}
+
 // forward runs a request that came from elsewhere through the API, as if from this computer.
 // changes says it may change things (it carried X-MineNest, which a page elsewhere can't send).
-func (m *Manager) forward(w http.ResponseWriter, r *http.Request, changes bool) {
-	p := r.URL.Path
-	if p == "/api/shutdown" || strings.HasPrefix(p, "/api/remote") || p == "/open" || strings.HasPrefix(p, "/api/account/oc") {
+func (m *Manager) forward(w http.ResponseWriter, r *http.Request, changes bool, door string) {
+	if localOnly(r.Method, r.URL.Path) {
 		http.Error(w, `{"error":"That can only be done on the computer MineNest runs on."}`, 403)
 		return
 	}
-	r2 := markElsewhere(r) // the API can tell this didn't come from this computer (files_api.go)
+	r2 := markElsewhere(r, door) // the API can tell this didn't come from this computer (files_api.go)
 	r2.Host = fmt.Sprintf("127.0.0.1:%d", m.Settings().APIPort)
 	r2.Header = http.Header{}
 	if ct := r.Header.Get("Content-Type"); ct != "" {
@@ -231,7 +246,7 @@ func (m *Manager) lanHandler() http.Handler {
 		ip, _, _ := net.SplitHostPort(req.RemoteAddr)
 		switch req.URL.Path {
 		case "/icon.svg":
-			m.forward(w, req, false)
+			m.forward(w, req, false, doorLAN)
 			return
 		case "/login":
 			if req.Method == "POST" {
@@ -287,7 +302,7 @@ func (m *Manager) lanHandler() http.Handler {
 			}
 			return
 		}
-		m.forward(w, req, req.Method == "GET" || req.Header.Get("X-MineNest") == "1")
+		m.forward(w, req, req.Method == "GET" || req.Header.Get("X-MineNest") == "1", doorLAN)
 	})
 }
 
@@ -387,7 +402,7 @@ func (m *Manager) webServe(ctx context.Context, rq remoteRequest) {
 			hreq.Header.Set("Content-Type", rq.CType)
 		}
 		hreq.RemoteAddr = "203.0.113.1:1" // not this computer's loopback
-		m.forward(rec, hreq, rq.Changes || rq.Method == "GET")
+		m.forward(rec, hreq, rq.Changes || rq.Method == "GET", doorWeb)
 	}
 	res := rec.Result()
 	out, _ := io.ReadAll(res.Body)

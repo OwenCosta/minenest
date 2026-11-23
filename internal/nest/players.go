@@ -100,7 +100,9 @@ func (s *Server) commandReply(ctx context.Context, action, cmd string) (replyKin
 	for time.Now().Before(deadline) {
 		for _, l := range s.Lines(since) {
 			since = l.Seq
-			if l.Kind == "sent" || l.Kind == "nest" {
+			// Only what the server itself says counts: a player's chat line or a join message
+			// can't pass for its answer.
+			if l.Kind == "sent" || l.Kind == "nest" || l.Kind == "chat" || l.Kind == "join" {
 				continue
 			}
 			t := l.Text
@@ -142,10 +144,22 @@ func (s *Server) PlayerAction(ctx context.Context, action, name, reason string) 
 	}
 	reason = cleanReason(reason)
 	if s.State() == Running {
-		return s.playerActionLive(ctx, action, pl, reason)
+		// The website door gives up on a request after 30 seconds, so this stops a little before.
+		ctx, cancel := context.WithTimeout(ctx, actionWait)
+		defer cancel()
+		said, err := s.playerActionLive(ctx, action, pl, reason)
+		if err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+			return "", errStoppedWaiting
+		}
+		return said, err
 	}
 	return s.playerActionFiles(ctx, action, pl, reason)
 }
+
+// actionWait is the longest one player action waits for the server and Mojang.
+var actionWait = 25 * time.Second
+
+var errStoppedWaiting = apiError{504, "MineNest stopped waiting. Open the Console to see whether it worked"}
 
 // cleanReason keeps a kick or ban reason to one plain line.
 func cleanReason(r string) string {

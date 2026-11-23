@@ -203,6 +203,7 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
   #side { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); }
   #server-list { display: flex; overflow-x: auto; }
   .page { padding: 16px; }
+  .tabs { flex-wrap: wrap; overflow-x: visible; }
   .create { grid-template-columns: 1fr; }
   .summary { position: static; }
   .form { grid-template-columns: 1fr; }

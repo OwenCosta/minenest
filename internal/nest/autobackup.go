@@ -123,12 +123,17 @@ func nextAuto(a AutoBackup, base time.Time) time.Time {
 }
 
 // autoNext counts from the last backup of any kind (or the last try, or when the schedule was
-// set, whichever is newest). One that didn't work is tried again within an hour.
+// set, whichever is newest). A daily one counts only from its own last try, so "every day at
+// 03:30" stays at 03:30 whatever backups are made by hand. One that didn't work is tried again
+// within an hour.
 func autoNext(a AutoBackup, st autoState, newest time.Time, loc *time.Location) time.Time {
 	if a.Every == "" {
 		return time.Time{}
 	}
 	base := newest
+	if a.Every == "day" {
+		base = time.Time{}
+	}
 	for _, u := range []int64{st.Last, a.Since} {
 		if t := time.Unix(u, 0); u > 0 && t.After(base) {
 			base = t
@@ -290,10 +295,24 @@ type autoSched struct {
 	started time.Time
 	jitter  map[string]time.Duration
 	running map[string]bool
+
+	quit     chan struct{} // closed when MineNest is closing: no new backups start
+	quitOnce sync.Once
 }
 
 func newAutoSched() *autoSched {
-	return &autoSched{started: time.Now(), jitter: map[string]time.Duration{}, running: map[string]bool{}}
+	return &autoSched{started: time.Now(), jitter: map[string]time.Duration{}, running: map[string]bool{}, quit: make(chan struct{})}
+}
+
+func (a *autoSched) stop() { a.quitOnce.Do(func() { close(a.quit) }) }
+
+func (a *autoSched) stopped() bool {
+	select {
+	case <-a.quit:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *autoSched) offset(id string) time.Duration {
@@ -373,12 +392,19 @@ func (m *Manager) SetAutoBackup(s *Server, a AutoBackup) (AutoStatus, error) {
 func (m *Manager) autoLoop() {
 	for {
 		m.autoTick(time.Now())
-		time.Sleep(20 * time.Second)
+		select {
+		case <-m.auto.quit:
+			return
+		case <-time.After(20 * time.Second):
+		}
 	}
 }
 
 func (m *Manager) autoTick(now time.Time) {
 	for _, s := range m.List() {
+		if m.auto.stopped() {
+			return
+		}
 		next := m.autoNextFor(s)
 		if next.IsZero() || now.Before(next) || m.auto.isRunning(s.ID) {
 			continue
@@ -394,6 +420,10 @@ func (m *Manager) autoTick(now time.Time) {
 func (m *Manager) autoBackup(s *Server) (*Job, error) {
 	if err := s.setBusy("an automatic backup", false); err != nil {
 		return nil, err
+	}
+	if st := s.State(); st == Starting || st == Stopping {
+		s.setBusy("", false)
+		return nil, fmt.Errorf("wait until the server has finished %s", st)
 	}
 	m.auto.mu.Lock()
 	m.auto.running[s.ID] = true

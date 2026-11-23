@@ -916,9 +916,9 @@ func TestTrashAndRestore(t *testing.T) {
 	_, s := newFilesServer(t)
 	put(t, s, "plugins/Essentials/config.yml", "e: 1\n")
 	put(t, s, "ops.json", "[]")
-	ids, err := s.FileDelete([]string{"plugins/Essentials", "ops.json"})
-	if err != nil || len(ids) != 2 {
-		t.Fatalf("%v %v", ids, err)
+	res, err := s.FileDelete([]string{"plugins/Essentials", "ops.json"})
+	if err != nil || len(res.Trashed) != 2 {
+		t.Fatalf("%v %v", res, err)
 	}
 	if !gone(s, "plugins/Essentials") || !gone(s, "ops.json") {
 		t.Fatal("still there")
@@ -1300,7 +1300,7 @@ func (h *apiHarness) do(method, path string, body any, elsewhere bool) *httptest
 	if elsewhere {
 		r.Host = "192.168.1.5:47576"
 		r.RemoteAddr = "192.168.1.5:5555"
-		h.m.forward(w, r, true)
+		h.m.forward(w, r, true, doorWeb)
 		return w
 	}
 	r.Header.Set("Authorization", "Bearer "+h.a.token)
@@ -1318,8 +1318,7 @@ func TestOtherComputersCanOnlyReadUnlessAllowed(t *testing.T) {
 	put(t, s, "plugins/a.yml", "a: 1\n")
 	put(t, s, "up.zip", string(makeZip(t, zipEntry{"z.txt", "z", 0})))
 	put(t, s, "old.txt", "old")
-	ids, _ := s.FileDelete([]string{"old.txt"})
-	_ = ids
+	s.FileDelete([]string{"old.txt"})
 	tr, _ := s.Trash()
 	tid := tr.Items[0].ID
 

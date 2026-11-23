@@ -92,14 +92,56 @@ func (s *Server) toTrash(t *fsTarget) (string, error) {
 	}
 	if err := os.Rename(t.Abs, filepath.Join(dir, "item")); err != nil {
 		safeRemoveAll(dir)
-		return "", fmt.Errorf("%q couldn't be moved to the trash (is something using it?): %v", t.Name, err)
+		return "", fmt.Errorf("%q couldn't be moved to the trash (is something using it?)", t.Name)
 	}
+	s.pruneTrash(id)
 	return id, nil
 }
 
+// The trash is not for ever: what is older than trashMaxAge goes, and when it holds more than
+// trashMaxBytes the oldest go first. The item just put in is always kept.
+var (
+	trashMaxAge   = 30 * 24 * time.Hour
+	trashMaxBytes = int64(5) << 30
+)
+
+func (s *Server) pruneTrash(keep string) {
+	tr, err := s.Trash()
+	if err != nil {
+		return
+	}
+	total := tr.Size
+	now := time.Now()
+	for i := len(tr.Items) - 1; i >= 0; i-- { // oldest first
+		it := tr.Items[i]
+		if it.ID == keep {
+			continue
+		}
+		old := now.Sub(time.Unix(it.Deleted, 0)) > trashMaxAge
+		if !old && total <= trashMaxBytes {
+			continue
+		}
+		if safeRemoveAll(filepath.Join(s.trashDir(), it.ID)) == nil {
+			total -= it.Size
+		}
+	}
+}
+
+// DeleteResult says what a delete did: what went to the trash, and what could not.
+type DeleteResult struct {
+	Trashed []string     `json:"-"`
+	Failed  []DeleteFail `json:"failed"`
+}
+
+type DeleteFail struct {
+	Path string `json:"path"`
+	Why  string `json:"why"`
+}
+
 // FileDelete moves each path to the trash. It checks all of them first, so a refusal leaves
-// everything as it was.
-func (s *Server) FileDelete(rels []string) ([]string, error) {
+// everything as it was. Then it moves what it can: one that is in use is reported, and the rest
+// still go.
+func (s *Server) FileDelete(rels []string) (*DeleteResult, error) {
 	if len(rels) == 0 {
 		return nil, fbad("say what to delete")
 	}
@@ -123,15 +165,19 @@ func (s *Server) FileDelete(rels []string) ([]string, error) {
 		}
 		ts = append(ts, t)
 	}
-	var ids []string
+	res := &DeleteResult{Failed: []DeleteFail{}}
 	for _, t := range ts {
 		id, err := s.toTrash(t)
 		if err != nil {
-			return ids, err
+			res.Failed = append(res.Failed, DeleteFail{Path: t.Rel, Why: "something is using it, so it stayed where it was"})
+			continue
 		}
-		ids = append(ids, id)
+		res.Trashed = append(res.Trashed, id)
 	}
-	return ids, nil
+	if len(res.Trashed) == 0 {
+		return nil, fblocked("%q couldn't be moved to the trash (is something using it?)", ts[0].Name)
+	}
+	return res, nil
 }
 
 func (s *Server) Trash() (*TrashInfo, error) {
@@ -214,6 +260,11 @@ func (s *Server) TrashRestore(id, to string, overwrite bool) (string, error) {
 	if dst.Rel == "" {
 		return "", fbad("say where to put it")
 	}
+	if !m.Dir {
+		if why := newFileWhy(dst.Rel, m.Name); why != "" && lowerRel(dst.Rel) != "server.properties" {
+			return "", fbad("%s", why)
+		}
+	}
 	if why := s.liveBlock(dst.Rel, m.Dir, false, false); why != "" {
 		return "", fblocked("%s", why)
 	}
@@ -245,7 +296,7 @@ func (s *Server) TrashRestore(id, to string, overwrite bool) (string, error) {
 		}
 	}
 	if err := os.Rename(item, dst.Abs); err != nil {
-		return "", fmt.Errorf("it couldn't be put back (is something using that place?): %v", err)
+		return "", fmt.Errorf("it couldn't be put back (is something using that place?)")
 	}
 	safeRemoveAll(dir)
 	return dst.Rel, nil
@@ -287,7 +338,7 @@ type limitWriter struct {
 	n int64
 }
 
-var errTooMuch = ftoobig("that is too much to send to another computer in one go. Download it on the computer MineNest runs on")
+var errTooMuch = ftoobig("that is too much to send through the website. Download it on the home network, or on the computer MineNest runs on")
 
 func (l *limitWriter) Write(p []byte) (int, error) {
 	if l.n -= int64(len(p)); l.n < 0 {
@@ -438,7 +489,7 @@ func (s *Server) FileUnzip(rel, into string, overwrite bool) (*UnzipResult, erro
 			return nil, fbad("that zip has a name that isn't allowed (%q), so it isn't unpacked", cutName(name))
 		}
 		m := f.Mode()
-		if m&fs.ModeSymlink != 0 || m&(fs.ModeDevice|fs.ModeNamedPipe|fs.ModeSocket|fs.ModeIrregular|fs.ModeCharDevice) != 0 {
+		if m&fs.ModeSymlink != 0 || (f.ExternalAttrs>>16)&0xF000 == 0xA000 || m&(fs.ModeDevice|fs.ModeNamedPipe|fs.ModeSocket|fs.ModeIrregular|fs.ModeCharDevice) != 0 {
 			return nil, fbad("that zip has a link or special file in it (%q), so it isn't unpacked", cutName(name))
 		}
 		if m.IsDir() {
@@ -449,7 +500,8 @@ func (s *Server) FileUnzip(rel, into string, overwrite bool) (*UnzipResult, erro
 			return nil, fbad("that zip has %q twice (or twice with different capitals), so it isn't unpacked", cutName(name))
 		}
 		seen[key] = true
-		if !isDir && blockedUpload[extOf(clean)] {
+		final := joinRel(destRel, clean)
+		if !isDir && newFileWhy(final, "") != "" {
 			res.Skipped = append(res.Skipped, clean)
 			continue
 		}
@@ -461,7 +513,6 @@ func (s *Server) FileUnzip(rel, into string, overwrite bool) (*UnzipResult, erro
 				return nil, ftoobig("that zip unpacks to more than %s, more than MineNest unpacks", humanSize(unzipMaxTotal))
 			}
 		}
-		final := joinRel(destRel, clean)
 		if len(strings.Split(final, "/")) > maxPathDepth {
 			return nil, fbad("that zip goes too many folders deep")
 		}
@@ -469,6 +520,20 @@ func (s *Server) FileUnzip(rel, into string, overwrite bool) (*UnzipResult, erro
 			return nil, fblocked("%s", why)
 		}
 		entries = append(entries, unzipEntry{f, final, isDir})
+	}
+	// A name can't be a file and a folder at once (a link entry beside a folder of the same name).
+	isFile := map[string]bool{}
+	for _, e := range entries {
+		if !e.dir {
+			isFile[lowerRel(e.rel)] = true
+		}
+	}
+	for _, e := range entries {
+		for p := parentRel(e.rel); p != ""; p = parentRel(p) {
+			if isFile[lowerRel(p)] {
+				return nil, fbad("that zip has %q as both a file and a folder, so it isn't unpacked", cutName(p))
+			}
+		}
 	}
 	// Where each one would land: no links on the way, nothing in the way of the wrong kind.
 	for _, e := range entries {
@@ -610,4 +675,13 @@ func copyLimited(path string, r io.Reader, limit int64) (int64, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+// trashSize is how much the trash holds.
+func (s *Server) trashSize() int64 {
+	tr, err := s.Trash()
+	if err != nil {
+		return 0
+	}
+	return tr.Size
 }

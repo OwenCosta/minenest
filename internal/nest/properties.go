@@ -16,7 +16,7 @@ type Properties struct {
 func loadProperties(path string) *Properties {
 	p := &Properties{path: path}
 	if b, err := os.ReadFile(path); err == nil {
-		s := strings.ReplaceAll(string(b), "\r\n", "\n")
+		s := strings.ReplaceAll(strings.ReplaceAll(string(b), "\r\n", "\n"), "\r", "\n")
 		p.lines = strings.Split(strings.TrimRight(s, "\n"), "\n")
 		if len(p.lines) == 1 && p.lines[0] == "" {
 			p.lines = nil
@@ -50,6 +50,10 @@ func unescapeProp(v string) string {
 				b.WriteByte('\n')
 			case 't':
 				b.WriteByte('\t')
+			case 'r':
+				b.WriteByte('\r')
+			case 'f':
+				b.WriteByte('\f')
 			default:
 				b.WriteByte(v[i])
 			}
@@ -61,7 +65,7 @@ func unescapeProp(v string) string {
 }
 
 func escapeProp(v string) string {
-	r := strings.NewReplacer("\\", "\\\\", "\n", "\\n", "=", "\\=", ":", "\\:")
+	r := strings.NewReplacer("\\", "\\\\", "\n", "\\n", "\r", "\\r", "\f", "\\f", " ", "\\n", " ", "\\n", "=", "\\=", ":", "\\:")
 	return r.Replace(v)
 }
 
@@ -165,4 +169,25 @@ func (p *Properties) Text() string {
 		return ""
 	}
 	return strings.Join(p.lines, "\n") + "\n"
+}
+
+// checkPropertySet says whether key and value are fine to write to server.properties. Java reads a
+// carriage return or form feed as the end of a line, which MineNest's own reading does not, so no
+// control characters are accepted. The world's folder has to be one plain folder name: the
+// backup and reset code works on whatever it names.
+func checkPropertySet(key, value string) error {
+	if key == "" || strings.ContainsAny(key, "=: #!\\") {
+		return bad("%q can't be set", key)
+	}
+	for _, s := range []string{key, value} {
+		for _, r := range s {
+			if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == 0x2028 || r == 0x2029 {
+				return bad("%q can't be set: it has a line break or another control character in it", key)
+			}
+		}
+	}
+	if key == "level-name" && !levelOK(value) {
+		return bad("the world's folder (level-name) has to be one plain folder name, like world")
+	}
+	return nil
 }

@@ -34,12 +34,14 @@ command line.
   or marked to keep (`minenest backup keep NAME`). It skips one, and says why, when nobody has
   played since the last one or the disk is nearly full. A backup missed while the computer was
   off is made soon after MineNest starts, and the server always goes back to saving its world
-  afterwards, even when a backup fails.
-- **How much memory is left:** MineNest says how much of the computer's memory is still free 
-  for servers and what size of server fits ("enough for one more 4 GB server, or two 2 GB 
-  ones"), in the sidebar, on the New server page, in a server's Settings and in `minenest 
-  memory`. It counts what running servers are given and really use, leaves room for the 
-  operating system, and warns, without stopping you, before a server that wouldn't fit is made 
+  afterwards, even when a backup fails. A daily one stays at its time of day whatever backups you
+  make by hand, and a server can't be stopped by hand in the middle of a backup (stopping
+  MineNest cancels the backups that are running first).
+- **How much memory is left:** MineNest says how much of the computer's memory is still free
+  for servers and what size of server fits ("enough for one more 4 GB server, or two 2 GB
+  ones"), in the sidebar, on the New server page, in a server's Settings and in `minenest
+  memory`. It counts what running servers are given and really use, leaves room for the
+  operating system, and warns, without stopping you, before a server that wouldn't fit is made
   or started. Where a number can't be read, it says so.
 - **Bring the servers you already have:** MineNest finds the ones on your computer, or you point
   it at a folder or upload a zip of one (**New server**, then **Add one you already have**, or
@@ -118,16 +120,25 @@ On **Settings and account**, two switches, both off until you turn them on:
   a connection out to XenithOS Cloud, which passes your browser's requests to it, so nothing has
   to be opened on your router.
 
-Either way you get the whole dashboard, console included. Stopping MineNest itself and these
-settings stay on the computer it runs on.
+Either way you get the whole dashboard, console included. Stopping or updating MineNest, these
+settings, signing the account in or out, forgetting the playit.gg account and changing a
+server's Java arguments stay on the computer it runs on. Through the website, files bigger than
+16 MB can't be sent either way (the whole answer travels inside one message); on the home
+network downloads have no limit.
 
 Files are the exception to "the whole dashboard". Someone who can put a plugin in a server's
 folder can run programs on your computer, so from another computer the Files page is **look
 only**: browsing, reading, downloading. Uploading, editing, moving, deleting and unpacking, and
 uploading a plugin or mod from the Mods page, only work from another computer after you turn on
-**Let other computers change files** in the same settings (off unless you do). MineNest checks
-this itself, not just the page. Looking for servers on the computer's own folders and bringing
-one in by its path also stay on the computer MineNest runs on.
+**Let other computers change files** in the same settings (off unless you do). That includes
+installing or updating a mod or plugin from Modrinth and bringing in a server from a zip. MineNest
+checks this itself, not just the page. Looking for servers on the computer's own folders,
+bringing one in by its path and Java's own arguments stay on the computer MineNest runs on even
+with the switch on, because they can load a program too.
+
+Reading is open to whoever is signed in, so from another computer someone can read a server's
+`server.properties` (with its RCON password), plugin settings with tokens in them, and download a
+whole server folder as a zip. Only sign in from computers you trust.
 
 ## Files
 
@@ -153,11 +164,19 @@ minenest files unzip packs/pack.zip
   a zip.
 - Upload by dragging files onto the list or with the Upload button (up to 1 GB each, with a
   progress bar). A plugin or mod `.jar` in `plugins` or `mods` is fine, and the page tells you the
-  server needs a restart to load it. Programs and scripts for Windows (`.exe`, `.bat`, `.cmd` and
-  the like) are refused.
+  server needs a restart to load it. Programs and scripts for Windows (`.exe`, `.bat`, `.cmd`,
+  `.js`, `.url` and the like) are refused, whether they are uploaded, unpacked, copied or made by
+  renaming something. `server.properties` can't be replaced by an upload, a move, a copy or an
+  unzip: open it in the editor, where MineNest checks it. The Mods page's "Add a file" goes
+  through the same upload, so it asks before replacing a file and waits while the server's files
+  are busy.
 - Rename, move and copy never replace something without asking. **Delete** moves things to a
   trash MineNest keeps for each server, outside the server's folder: you can put them back, and
-  only **Empty the trash** deletes for good. Anything that was replaced also goes there.
+  **Empty the trash** deletes for good. Anything that was replaced also goes there. The trash
+  doesn't grow for ever: what is older than 30 days goes, and when it holds more than 5 GB the
+  oldest go first (the Delete box and the World page say how much it holds). When some of
+  several things can't be moved because the server is using them, the rest still go and the
+  page lists the ones that stayed.
 - **Unzip** unpacks a zip where it is, after checking all of it: anything that would land outside
   the folder, links, odd names, more than 50,000 files or more than 4 GB unpacked stops it before
   a single file is written.
@@ -169,7 +188,8 @@ minenest files unzip packs/pack.zip
   the trash) are out of reach. Names are refused if they use `..`, a full path, a drive letter,
   a network path, `name:stream`, a Windows device name (`CON`, `NUL`, `COM1`...), a trailing dot
   or space, or odd control characters. A link or junction in the folder is shown as a link and
-  never followed, for reading, writing, copying, zipping or deleting. Downloads are always sent
+  never followed, for reading, writing, copying, zipping or deleting. Leftovers of an upload or
+  an unzip that was cut off are cleaned up after an hour. Downloads are always sent
   as attachments, so an uploaded web page can't run from MineNest's address.
 
 ## Updates

@@ -93,6 +93,7 @@ func (m *Manager) Autostart() {
 	m.resumeServers()
 	go m.autoLoop()
 	for _, s := range m.List() {
+		go s.sweepTemp()
 		if s.Config().Autostart && s.State() == Stopped {
 			if err := s.Start(); err != nil {
 				s.Note("It didn't start with MineNest: %v", err)
@@ -103,6 +104,10 @@ func (m *Manager) Autostart() {
 
 // Shutdown stops every server, saving their worlds (the daemon is closing).
 func (m *Manager) Shutdown() {
+	// No new backups, and the ones running stop (and turn saving back on), so each server can
+	// be stopped with its world in one piece.
+	m.auto.stop()
+	m.Jobs.cancelBackups()
 	var wg sync.WaitGroup
 	for _, s := range m.List() {
 		wg.Add(1)
