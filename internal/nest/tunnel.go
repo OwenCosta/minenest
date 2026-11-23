@@ -23,13 +23,12 @@ import (
 // sshd. MineNest logs in with a key of its own (ed25519, in tunnel/key), never a password.
 //
 // The player's own VPS: its host key is trusted the first time it's seen and checked after.
-// The supporter relay: its host key comes from XenithOS Cloud and is the only one trusted.
 
 type TunnelConfig struct {
 	Host       string `json:"host"`
 	User       string `json:"user"`
 	SSHPort    int    `json:"ssh_port"`
-	Bind       string `json:"bind"`        // where it listens there: "0.0.0.0", or "127.0.0.1" for the relay
+	Bind       string `json:"bind"`        // where it listens there: "0.0.0.0" or an address of its own
 	PublicPort int    `json:"public_port"` // what players connect to there
 }
 
@@ -110,14 +109,6 @@ func forgetHost(hostport string) {
 		}
 	}
 	writeFile(path, []byte(strings.Join(keep, "\n")+"\n"), 0o600)
-}
-
-func pinnedHostKey(line string) (ssh.HostKeyCallback, error) {
-	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
-	if err != nil {
-		return nil, fmt.Errorf("the relay's identity from XenithOS Cloud couldn't be read")
-	}
-	return ssh.FixedHostKey(key), nil
 }
 
 type tunnel struct {

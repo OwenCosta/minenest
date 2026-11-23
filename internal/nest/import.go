@@ -207,7 +207,7 @@ func (m *Manager) newServer(name, flavor, version string, ram int) (*Server, str
 		ram = suggestedRAM(flavor, false)
 	}
 	s := &Server{ID: id, Dir: homePath("servers", id), m: m, state: Stopped}
-	s.cfg = Config{Name: name, Flavor: flavor, Want: version, RAM: ram, AutoRestart: true, RealIPs: true, Created: time.Now()}
+	s.cfg = Config{Name: name, Flavor: flavor, Want: version, RAM: ram, AutoRestart: true, Created: time.Now()}
 	if err := os.MkdirAll(s.Root(), 0o755); err != nil {
 		return nil, "", err
 	}

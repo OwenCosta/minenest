@@ -60,15 +60,14 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
   minenest restore BACKUP [-s SERVER]   put a backup back (the world now is backed up first)
   minenest new-world [-s SERVER] [--seed SEED]
 
-  minenest internet [-s SERVER] off|playit|relay
+  minenest internet [-s SERVER] off|playit
   minenest internet retry               start playit.gg's agent again after a problem
   minenest internet [-s SERVER] vps --host HOST --user USER [--ssh-port 22] [--port 25565]
   minenest bedrock [-s SERVER] on|off|update   Bedrock players through Geyser (Paper)
   minenest sshkey                       MineNest's key, for a VPS's authorized_keys
 
-  minenest account [login|logout]       sign in with your OCAccount (for the supporter relay)
+  minenest account [login|logout]       sign in with your OCAccount (for the Remote dashboard)
                                         (login --pin: a XenithOS profile's name and PIN instead)
-  minenest relay [status|claim NAME|release]  your own address as a supporter on Patreon
 
   minenest autostart on|off             start MineNest when you sign in
   minenest delete SERVER                remove a server and all its files
@@ -508,8 +507,6 @@ func run(args []string) error {
 		return nil
 	case "account":
 		return account(c, f)
-	case "relay":
-		return relay(c, f)
 	case "delete", "remove", "rm":
 		id, err := pick(c, f.server(true))
 		if err != nil {
@@ -653,7 +650,7 @@ func status(c *client, ref string) error {
 	if s.Addresses.Home != "" {
 		fmt.Printf("  %-14s %s\n", "At home", s.Addresses.Home)
 	}
-	way := map[string]string{"": "off", "playit": "playit.gg", "vps": "your VPS", "relay": "the supporter relay"}[s.Way.Kind]
+	way := map[string]string{"": "off", "playit": "playit.gg", "vps": "your VPS"}[s.Way.Kind]
 	fmt.Printf("  %-14s %s", "Internet", way)
 	if s.Way.Address != "" {
 		fmt.Printf(": %s", s.Way.Address)
@@ -931,7 +928,7 @@ func config(c *client, f flags) error {
 		if err := c.get(sp(id), &s); err != nil {
 			return err
 		}
-		fmt.Printf("name=%s\nram=%dM\nautostart=%s\nauto-restart=%s\nreal-ips=%s\njvm-args=%s\n", s.Name, s.RAM, onOff(s.Autostart), onOff(s.AutoRestart), onOff(s.RealIPs), s.JVMArgs)
+		fmt.Printf("name=%s\nram=%dM\nautostart=%s\nauto-restart=%s\njvm-args=%s\n", s.Name, s.RAM, onOff(s.Autostart), onOff(s.AutoRestart), s.JVMArgs)
 		return nil
 	}
 	patch := map[string]any{}
@@ -951,14 +948,12 @@ func config(c *client, f flags) error {
 			patch["autostart"] = isOn(v)
 		case "auto-restart":
 			patch["auto_restart"] = isOn(v)
-		case "real-ips":
-			patch["real_ips"] = isOn(v)
 		case "name":
 			patch["name"] = v
 		case "jvm-args":
 			patch["jvm_args"] = v
 		default:
-			return fmt.Errorf("unknown setting %q (ram, autostart, auto-restart, real-ips, name, jvm-args). For server.properties use: minenest set", k)
+			return fmt.Errorf("unknown setting %q (ram, autostart, auto-restart, name, jvm-args). For server.properties use: minenest set", k)
 		}
 	}
 	if err := c.do("PATCH", sp(id), patch, nil); err != nil {
@@ -1064,8 +1059,6 @@ func internet(c *client, f flags) error {
 		c.get("/api/sshkey", &k)
 		fmt.Println("Your VPS is the way in. Put this line in ~/.ssh/authorized_keys for that user on the VPS:\n  " + k.Key)
 		fmt.Println("and set 'GatewayPorts clientspecified' in its sshd_config so friends can reach the port.")
-	case "relay":
-		fmt.Println("The supporter relay is the way in. It connects when the server starts.")
 	default:
 		fmt.Println("Only people at home (and on this computer) can join now.")
 	}
@@ -1079,7 +1072,7 @@ func account(c *client, f flags) error {
 	}
 	switch sub {
 	case "", "status":
-		var r nest.RelayInfo
+		var r nest.AccountInfo
 		if err := c.get("/api/account", &r); err != nil {
 			return err
 		}
@@ -1143,49 +1136,6 @@ func account(c *client, f flags) error {
 		return c.post("/api/account/logout", nil, nil)
 	}
 	return fmt.Errorf("unknown: minenest account %s (login, login --pin, create, logout)", sub)
-}
-
-func relay(c *client, f flags) error {
-	what, name := "status", ""
-	if len(f.pos) > 0 {
-		what = f.pos[0]
-	}
-	if len(f.pos) > 1 {
-		name = f.pos[1]
-	}
-	if what == "claim" && name == "" {
-		return fmt.Errorf("say which name: minenest relay claim NAME")
-	}
-	var r nest.RelayInfo
-	err := c.post("/api/relay/"+what, map[string]string{"name": name}, &r)
-	if err != nil {
-		return err
-	}
-	if !r.Open {
-		fmt.Println("The supporter relay isn't taking supporters right now.")
-	}
-	if r.Message != "" {
-		fmt.Println(r.Message)
-	}
-	if r.Name != "" {
-		fmt.Printf("Your name: %s (%s)  address: %s\n", r.Name, r.State, r.Address)
-		if r.UsedBy != "" {
-			fmt.Println("Used by: " + r.UsedBy)
-		} else {
-			fmt.Println("Use it for a server with: minenest internet -s SERVER relay")
-		}
-	} else if r.Step == "ok" && r.Suggest != "" {
-		fmt.Printf("Pick a name, like: minenest relay claim %s\n", r.Suggest)
-	}
-	if r.Step == "patreon" || r.Step == "tier" {
-		if r.Patreon != "" {
-			fmt.Println("Become a supporter: " + r.Patreon)
-		}
-	}
-	if r.Step == "link" && r.LinkURL != "" {
-		fmt.Println("Link your Patreon and this profile: " + r.LinkURL)
-	}
-	return nil
 }
 
 // ------------------------------------------------------------------ little things

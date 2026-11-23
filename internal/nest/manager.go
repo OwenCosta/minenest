@@ -15,7 +15,7 @@ import (
 
 // Settings are MineNest's own (minenest.json in its home folder).
 type Settings struct {
-	Cloud        string `json:"cloud"`         // XenithOS Cloud, for the account and the supporter relay
+	Cloud        string `json:"cloud"`         // XenithOS Cloud, for the account and the Remote dashboard
 	AccountName  string `json:"account_name"`  // the signed-in XenithOS profile
 	AccountToken string `json:"account_token"` // its token (the file is readable by this user only)
 	OCAccount    string `json:"oc_account"`    // the OCAccount it was signed in with, if any
@@ -33,7 +33,6 @@ type Manager struct {
 	settings Settings
 	Jobs     jobList
 	playit   *playitAgent
-	relay    *relayState
 	auto     *autoSched
 	mem      memCache // the memory summary, for a few seconds (memory.go)
 
@@ -59,7 +58,6 @@ func NewManager() (*Manager, error) {
 		m.settings.APIPort = APIPort
 	}
 	m.playit = newPlayit(m)
-	m.relay = newRelay(m)
 	entries, _ := os.ReadDir(homePath("servers"))
 	for _, e := range entries {
 		if !e.IsDir() || !exists(homePath("servers", e.Name(), "nest.json")) {
@@ -273,9 +271,6 @@ func (m *Manager) Delete(s *Server) error {
 	if err := s.setBusy("deleting", true); err != nil {
 		return err
 	}
-	if s.Config().Way == "relay" {
-		m.relay.serverGone(s)
-	}
 	m.mu.Lock()
 	delete(m.servers, s.ID)
 	m.mu.Unlock()
@@ -338,20 +333,6 @@ func (m *Manager) serverStopped(s *Server) {
 	}
 }
 
-func (m *Manager) wantsDoor(s *Server) bool {
-	cfg := s.Config()
-	if cfg.Way != "relay" || !cfg.RealIPs || cfg.Installed == nil {
-		return false
-	}
-	if cfg.Installed.Flavor != "paper" && cfg.Installed.Flavor != "purpur" {
-		return false
-	}
-	if cfg.Bedrock && geyserInstalled(s) {
-		return false // Geyser's own connection into Paper hasn't been tried with proxy-protocol on
-	}
-	return m.relay.proxyAble()
-}
-
 // ------------------------------------------------------------------ status
 
 type Addresses struct {
@@ -384,7 +365,6 @@ type ServerStatus struct {
 	BedrockOn      bool         `json:"bedrock_on"`
 	Autostart      bool         `json:"autostart"`
 	AutoRestart    bool         `json:"auto_restart"`
-	RealIPs        bool         `json:"real_ips"`
 	AddonKind      string       `json:"addon_kind"`
 	Modpack        string       `json:"modpack,omitempty"`
 	JVMArgs        string       `json:"jvm_args"`
@@ -403,7 +383,7 @@ func (m *Manager) Status(s *Server) ServerStatus {
 	s.mu.Lock()
 	cfg := s.cfg
 	st := ServerStatus{ID: s.ID, Name: cfg.Name, Flavor: cfg.Flavor, State: s.state, Busy: s.busy, Why: s.why,
-		RAM: cfg.RAM, Bedrock: cfg.Bedrock, Autostart: cfg.Autostart, AutoRestart: cfg.AutoRestart, RealIPs: cfg.RealIPs,
+		RAM: cfg.RAM, Bedrock: cfg.Bedrock, Autostart: cfg.Autostart, AutoRestart: cfg.AutoRestart,
 		Modpack: cfg.Modpack, JVMArgs: cfg.JVMArgs, Folder: s.Root(), LastSeq: s.seq}
 	if s.state != Stopped {
 		st.Uptime = int64(time.Since(s.started).Seconds())

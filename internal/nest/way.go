@@ -10,12 +10,11 @@ import (
 // The ways in from the internet, one per server at a time:
 //   playit   playit.gg's free tunnel (playit.go)
 //   vps      a VPS of the user's own, through an SSH tunnel (this file)
-//   relay    the supporter relay: a name of their own for supporters on Patreon (relay.go)
 // Each starts when the server is ready and stops with it. Players at home and on this computer
 // always join directly.
 
 type WayStatus struct {
-	Kind     string   `json:"kind"`  // "", playit, vps, relay
+	Kind     string   `json:"kind"`  // "", playit, vps
 	State    string   `json:"state"` // off, waiting, connecting, up, retrying, problem
 	Up       bool     `json:"up"`
 	Address  string   `json:"address,omitempty"`
@@ -52,8 +51,6 @@ func (m *Manager) wayFor(s *Server, kind string) way {
 		w.address = func() string { return joinAddr(cfg.Host, cfg.PublicPort) }
 		w.target = func() (string, int) { return cfg.Host, cfg.PublicPort }
 		return w
-	case "relay":
-		return m.relay.wayFor(s)
 	}
 	return nil
 }
@@ -65,8 +62,6 @@ func (m *Manager) idleWayStatus(s *Server, kind string) WayStatus {
 	case "vps":
 		c := s.Config().VPS.Tunnel
 		return WayStatus{Kind: "vps", State: "waiting", Address: joinAddr(c.Host, c.PublicPort), Note: "Starts with the server."}
-	case "relay":
-		return m.relay.idleStatus(s)
 	}
 	return WayStatus{Kind: kind, State: "off"}
 }
@@ -113,11 +108,9 @@ func (m *Manager) SetWay(s *Server, kind string, vps *TunnelConfig) error {
 			return err
 		}
 	case "relay":
-		if err := m.relay.canUse(s); err != nil {
-			return err
-		}
+		return fmt.Errorf("the supporter relay has ended. Pick playit.gg or your own VPS instead")
 	default:
-		return fmt.Errorf("unknown way in %q (off, playit, vps or relay)", kind)
+		return fmt.Errorf("unknown way in %q (off, playit or vps)", kind)
 	}
 	// Stop the old way, if the server is up, and start the new one.
 	s.mu.Lock()
@@ -130,9 +123,6 @@ func (m *Manager) SetWay(s *Server, kind string, vps *TunnelConfig) error {
 	}
 	if err := s.update(func(c *Config) { c.Way = kind }); err != nil {
 		return err
-	}
-	if kind == "relay" {
-		m.relay.syncProxy(s)
 	}
 	if running && kind != "" {
 		m.serverReady(s)

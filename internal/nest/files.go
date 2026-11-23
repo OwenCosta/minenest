@@ -404,9 +404,6 @@ func holdsLive(dir string) bool {
 
 // managedFile says why a file MineNest writes itself can't be changed by hand right now.
 func (s *Server) managedFile(rel string) string {
-	if lowerRel(rel) == "config/paper-global.yml" && s.doorLocked() != nil {
-		return "MineNest is using this file for players' real addresses while the server runs. Stop the server first"
-	}
 	return ""
 }
 
@@ -953,8 +950,7 @@ func (s *Server) FileWrite(w WriteRequest) (*FileContent, error) {
 }
 
 // checkProperties makes a hand-edited server.properties safe for MineNest: the port has to be a
-// real one, and while the doorway for players' real addresses is up, the port and address are the
-// ones MineNest set (it puts the players' ones back when the server stops). Everything else, the
+// real one. Everything else, the
 // comments and the order included, is the user's.
 func (s *Server) checkProperties(text string) (string, error) {
 	p := propertiesFromText(text)
@@ -962,14 +958,6 @@ func (s *Server) checkProperties(text string) (string, error) {
 		return "", fbad("the world's folder (level-name) has to be one plain folder name, like world")
 	}
 	cur := s.props()
-	if d := s.doorLocked(); d != nil {
-		for _, k := range []string{"server-port", "server-ip"} {
-			if v, ok := cur.Get(k); ok {
-				p.Set(k, v)
-			}
-		}
-		return p.Text(), nil
-	}
 	if v, ok := p.Get("server-port"); ok {
 		n, err := strconv.Atoi(strings.TrimSpace(v))
 		if err != nil || n < 1024 || n > 65535 {

@@ -17,10 +17,8 @@ command line.
 - **Runs in the background:** close the window and the servers keep going. Start servers with
   MineNest, and MineNest when you sign in. A crashed server starts again by itself, and MineNest
   tells you why it crashed in plain words.
-- **Friends on the internet:** playit.gg (free, no router changes), your own VPS (an SSH
-  tunnel), or the **supporter relay**: supporters on Patreon get their own address, like
-  `brave-otter.mc.owencosta.diy`, with nothing to set up. Each way is checked from outside, so you
-  know friends can really get in. If playit.gg's agent has trouble, the Internet page shows what
+- **Friends on the internet:** playit.gg (free, no router changes) or your own VPS (an SSH
+  tunnel). Each way is checked from outside, so you know friends can really get in. If playit.gg's agent has trouble, the Internet page shows what
   it said last, what to do, and a **Try again** button (`minenest internet retry`).
 - **Bedrock players** (phones, consoles, Windows) through GeyserMC's Geyser and Floodgate.
 - **Players, settings, worlds:** whitelist, operators, bans, kicks; every server.properties
@@ -95,18 +93,17 @@ minenest create "Cobblemon" --modpack cobblemon-fabric
 
 `minenest help` lists everything. With more than one server, add `-s NAME`.
 
-## The supporter relay
+## Signing in
 
-Supporters on [Patreon](https://www.patreon.com/) get a name of their own for their server,
-which friends type in Minecraft, without playit.gg, a VPS or router changes:
+On MineNest's **Settings and account** page choose **Sign in with your OCAccount** (or run
+`minenest account login`). Your browser opens your OCAccount at owencosta.diy. It is only needed
+for the Remote dashboard below, a perk for supporters on Patreon; everything else in MineNest works
+without signing in. A XenithOS profile's name and PIN still work instead of an OCAccount
+(`minenest account login --pin`).
 
-1. On MineNest's **Account** page choose **Sign in with your OCAccount** (or run
-   `minenest account login`). Your browser opens your OCAccount at owencosta.diy.
-2. On your OCAccount, link your Patreon, and link (or make) your XenithOS profile.
-3. Back in MineNest, pick a name, and choose **Supporter relay** on the server's Internet page.
-
-With Paper or Purpur, players' real addresses come through too, so bans by address work. A
-XenithOS profile's name and PIN still work instead of an OCAccount (`minenest account login --pin`).
+The supporter relay, which gave supporters an address of their own, has ended. A server that used
+it goes back to home only the next time MineNest starts, with a note in its console: pick
+playit.gg or your own VPS on its Internet page to let friends join from outside.
 
 ## Use it from another computer
 
@@ -182,8 +179,7 @@ minenest files unzip packs/pack.zip
   a single file is written.
 - While the server is running, its world's region files, `session.lock`, `level.dat` and its own
   program can't be changed, and the page says why. `server.properties` is saved through the same
-  checks as the Settings page, so the port can't be broken, and while players' real addresses
-  are on, the port and address MineNest set are kept.
+  checks as the Settings page, so the port can't be broken.
 - It only reaches the server's own folder. MineNest's own files (its settings, keys, backups and
   the trash) are out of reach. Names are refused if they use `..`, a full path, a drive letter,
   a network path, `name:stream`, a Windows device name (`CON`, `NUL`, `COM1`...), a trailing dot

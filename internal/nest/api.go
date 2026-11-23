@@ -396,7 +396,6 @@ func (a *api) routes() http.Handler {
 			RAM         *int    `json:"ram_mb"`
 			Autostart   *bool   `json:"autostart"`
 			AutoRestart *bool   `json:"auto_restart"`
-			RealIPs     *bool   `json:"real_ips"`
 			JVMArgs     *string `json:"jvm_args"`
 		}
 		if err := body(r, &o); err != nil {
@@ -425,9 +424,6 @@ func (a *api) routes() http.Handler {
 			}
 			if o.AutoRestart != nil {
 				c.AutoRestart = *o.AutoRestart
-			}
-			if o.RealIPs != nil {
-				c.RealIPs = *o.RealIPs
 			}
 			if o.JVMArgs != nil {
 				c.JVMArgs = strings.TrimSpace(*o.JVMArgs)
@@ -799,8 +795,8 @@ func (a *api) routes() http.Handler {
 
 	a.fileRoutes(mux, h)
 
-	// The account and the supporter relay
-	h("GET /api/account", func(r *http.Request) (any, error) { return a.m.RelayInfo(), nil })
+	// The account
+	h("GET /api/account", func(r *http.Request) (any, error) { return a.m.AccountInfo(), nil })
 	h("POST /api/account/login", func(r *http.Request) (any, error) {
 		var o struct {
 			Name, Pin string
@@ -850,11 +846,6 @@ func (a *api) routes() http.Handler {
 	h("POST /api/account/logout", func(r *http.Request) (any, error) {
 		a.m.Logout(r.Context())
 		return nil, nil
-	})
-	h("POST /api/relay/{what}", func(r *http.Request) (any, error) {
-		var o struct{ Name string }
-		body(r, &o)
-		return a.m.RelayAsk(r.Context(), r.PathValue("what"), o.Name)
 	})
 	return mux
 }

@@ -182,7 +182,7 @@ function renderTab(full) {
 const copyBtn = (text) => h("button", { class: "btn small", onclick: () => { navigator.clipboard.writeText(text); toast("Copied " + text); } }, "Copy");
 const addrRow = (label, value) => h("div", { class: "addr" }, h("span", { class: "lbl" }, label), h("code", {}, value), copyBtn(value));
 function uptime(sec) { const hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60); return hh ? `${hh} h ${mm} min` : `${mm} min`; }
-const wayNames = { "": "Only at home", playit: "playit.gg", vps: "Your own VPS", relay: "Supporter relay" };
+const wayNames = { "": "Only at home", playit: "playit.gg", vps: "Your own VPS" };
 
 function tabOverview(s) {
   const way = s.way || {};
@@ -533,7 +533,6 @@ async function tabInternet(s, full) {
   const kinds = [
     ["", "Only at home", "People on this computer and your home network. Nothing to set up."],
     ["playit", "playit.gg", "Free. Your playit.gg account gives the server an address. Bedrock works too."],
-    ["relay", "Supporter relay", "For supporters on Patreon: your own name, like brave-otter.mc.owencosta.diy."],
     ["vps", "Your own VPS", "An SSH tunnel to a server you rent."],
   ];
   if (full && (way.kind === "vps" || S.vpsOpen)) {
@@ -583,11 +582,8 @@ async function tabInternet(s, full) {
           toast("Fill in your VPS's details below, then choose Switch to this VPS.");
           return;
         }
-        if (k === "relay" && !S.info.account) { openAccount(); toast("Sign in with your OCAccount first.", true); return; }
         act(() => api("POST", sp("/way"), { kind: k }), k ? `${name} is the way in now.` : "Only people at home can join now.").then(() => refresh()).then(() => tabInternet(S.status, true));
-      } }, h("span", { class: "radio" }), h("b", {}, name), h("span", {}, about)))),
-      way.kind === "relay" && ["paper", "purpur"].includes(s.flavor) ? h("label", { class: "check mt" }, h("input", { type: "checkbox", checked: s.real_ips, onchange: (e) => act(() => api("PATCH", sp(), { real_ips: e.target.checked }), "Saved. It counts from the next start.") }),
-        h("span", {}, "Pass on players' real addresses", h("div", { class: "h" }, "So bans by address work through the relay. Not with Bedrock players on."))) : null),
+      } }, h("span", { class: "radio" }), h("b", {}, name), h("span", {}, about))))),
     status);
 }
 
@@ -780,7 +776,7 @@ function openImport() {
   })();
 }
 
-// ------------------------------------------------------------------ account and relay
+// ------------------------------------------------------------------ account
 
 async function openAccount() {
   S.view = "account"; renderSide(); show("account");
@@ -788,8 +784,7 @@ async function openAccount() {
   fill(el, h("p", { class: "muted" }, "Loading..."));
   let r;
   try { r = await api("GET", "/api/account"); } catch (e) { fill(el, msg("bad", null, e.message)); return; }
-  if (r.signed_in && !r.step) { try { r = await api("POST", "/api/relay/status", {}); } catch (e) { toast(e.message, true); } }
-  const head = h("div", { class: "srv-head" }, h("div", {}, h("h1", {}, "Settings and account"), h("div", { class: "sub" }, "Your OCAccount, the supporter relay, other computers and updates")),
+  const head = h("div", { class: "srv-head" }, h("div", {}, h("h1", {}, "Settings and account"), h("div", { class: "sub" }, "Your OCAccount, other computers and updates")),
     h("button", { class: "link", onclick: () => { S.view = "server"; refresh().then(() => renderTab(true)); } }, "Back to servers"));
   if (!r.signed_in) {
     const n = h("input", { placeholder: "Profile name" }), pin = h("input", { type: "password", inputmode: "numeric" });
@@ -814,31 +809,16 @@ async function openAccount() {
       h("div", { class: "form", style: "max-width:480px" }, h("label", {}, "Profile name"), n, h("label", {}, "PIN"), pin),
       h("div", { class: "row mt" }, h("button", { class: "btn", onclick: () => go(false) }, "Sign in"), h("button", { class: "btn", onclick: () => go(true) }, "Make a new profile")));
     fill(el, head, h("div", { class: "mt" }), section("Sign in", null,
-      h("p", { class: "muted" }, "Sign in with your OCAccount (owencosta.diy). It's what the supporter relay goes by: link your Patreon to the same account and your server gets its own address. Everything else in MineNest works without signing in."),
+      h("p", { class: "muted" }, "Sign in with your OCAccount (owencosta.diy). It's what the Remote dashboard for supporters on Patreon goes by. Everything else in MineNest works without signing in."),
       ocBtn, status,
       h("p", { class: "mt" }, h("button", { class: "link", onclick: () => pinBox.classList.toggle("hidden") }, "Or use a XenithOS profile's name and PIN")),
       pinBox));
     extraSettings(el);
     return;
   }
-  const claimName = h("input", { placeholder: r.suggest || "your-server", value: r.name || "" });
   fill(el, head, h("div", { class: "mt" }),
     section("Account", null, h("div", { class: "row" }, h("span", {}, "Signed in as ", h("b", {}, r.account), r.oc_account ? h("span", { class: "muted" }, ` (OCAccount ${r.oc_account})`) : null),
-      h("button", { class: "btn small", onclick: () => act(() => api("POST", "/api/account/logout"), "Signed out.").then(() => { S.info.account = ""; openAccount(); }) }, "Sign out"))),
-    section("Supporter relay", "your own address, for supporters on Patreon",
-      !r.open ? msg("warn", "Closed", "The relay isn't taking supporters right now.") : null,
-      r.message ? msg(r.step === "ok" ? "good" : "", null, r.message) : null,
-      r.step === "link" && r.link_url ? h("p", {}, h("a", { href: r.link_url, target: "_blank", rel: "noopener" }, "Link your Patreon and this profile on OCAccounts")) : null,
-      (r.step === "patreon" || r.step === "tier") && r.patreon ? h("p", {}, h("a", { href: r.patreon, target: "_blank", rel: "noopener" }, "Become a supporter on Patreon")) : null,
-      r.tier ? h("p", { class: "muted" }, "Tier: " + r.tier) : null,
-      r.name ? [addrRow("Your address", r.address), h("p", { class: "muted" }, r.used_by ? `${r.used_by} uses it.` : "To use it, choose Supporter relay on a server's Internet tab.")] : null,
-      r.step === "ok" ? h("div", { class: "form mt" }, h("label", {}, r.name ? "A different name" : "Pick a name"),
-        h("div", { class: "row" }, h("div", { class: "grow" }, claimName), h("span", { class: "muted" }, "." + (r.domain || "mc.owencosta.diy")),
-          h("button", { class: "btn primary", onclick: () => act(() => api("POST", "/api/relay/claim", { name: claimName.value || r.suggest }), "It's yours.").then(openAccount) }, r.name ? "Change" : "Claim it")),
-        h("div", { class: "help" }, "3 to 20 small letters, numbers and hyphens.")) : null,
-      h("div", { class: "row mt" },
-        h("button", { class: "btn", onclick: () => act(() => api("POST", "/api/relay/status", {}), "Checked.").then(openAccount) }, "Check my membership"),
-        r.name ? h("button", { class: "btn danger", onclick: () => confirmDialog("Give up your name?", "It's kept for you for a week in case you change your mind.", "Give it up", () => act(() => api("POST", "/api/relay/release", {}), "Released.").then(openAccount)) }, "Give up the name") : null)));
+      h("button", { class: "btn small", onclick: () => act(() => api("POST", "/api/account/logout"), "Signed out.").then(() => { S.info.account = ""; openAccount(); }) }, "Sign out"))));
   extraSettings(el);
 }
 

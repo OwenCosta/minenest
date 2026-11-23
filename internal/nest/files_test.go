@@ -613,40 +613,6 @@ func TestPropertiesEditsKeepMineNestsKeys(t *testing.T) {
 	if v, ok := s.props().Get("server-port"); !ok || v != "25571" {
 		t.Errorf("the port is %q %v", v, ok)
 	}
-	// While the doorway for players' real addresses is up, Paper's loopback port and address in the
-	// file are MineNest's: an edit can't change them, and they go back to the players' ones at stop.
-	put(t, s, "server.properties", "motd=Door\nserver-port=34567\nserver-ip=127.0.0.1\n")
-	s.mu.Lock()
-	s.door = &door{s: s, playersPort: 25565, paperPort: 34567}
-	s.state = Running
-	s.mu.Unlock()
-	if err := save("motd=Door 2\nserver-port=25565\nserver-ip=\n"); err != nil {
-		t.Fatal(err)
-	}
-	p := s.props()
-	if v, _ := p.Get("server-port"); v != "34567" {
-		t.Errorf("the door's port became %q", v)
-	}
-	if v, _ := p.Get("server-ip"); v != "127.0.0.1" {
-		t.Errorf("the door's address became %q", v)
-	}
-	if v, _ := p.Get("motd"); v != "Door 2" {
-		t.Errorf("the edit was lost: %q", v)
-	}
-	if err := save("motd=No port\n"); err != nil {
-		t.Fatal(err)
-	}
-	if v, _ := s.props().Get("server-port"); v != "34567" {
-		t.Errorf("the door's port was lost: %q", v)
-	}
-	// And the file Paper's proxy setting lives in is left to MineNest meanwhile.
-	put(t, s, "config/paper-global.yml", "proxies:\n  proxy-protocol: true\n")
-	if _, err := s.FileWrite(WriteRequest{Path: "config/paper-global.yml", Text: "proxies:\n  proxy-protocol: false\n"}); err == nil {
-		t.Error("changed the proxy setting while the doorway was up")
-	}
-	if _, err := s.FileDelete([]string{"config/paper-global.yml"}); err == nil {
-		t.Error("deleted the proxy settings while the doorway was up")
-	}
 }
 
 // ------------------------------------------------------------------ a running server

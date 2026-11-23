@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -34,9 +33,6 @@ func TestVersions(t *testing.T) {
 	}
 	if got := sortNewestFirst([]string{"1.20.1", "26.1", "1.21.11", "1.21.4"}); strings.Join(got, ",") != "26.1,1.21.11,1.21.4,1.20.1" {
 		t.Fatal(got)
-	}
-	if !paperTakesProxy("1.19.4") || paperTakesProxy("1.19.3") || !paperTakesProxy("26.1") {
-		t.Fatal("paperTakesProxy")
 	}
 }
 
@@ -101,63 +97,6 @@ func TestPaperProxyProtocol(t *testing.T) {
 	if string(b) != "proxies:\n    proxy-protocol: true\n    velocity:\n      enabled: false\nother: 1\n" {
 		t.Fatalf("got\n%s", b)
 	}
-}
-
-func TestProxyV2Header(t *testing.T) {
-	src := &net.TCPAddr{IP: net.ParseIP("203.0.113.7"), Port: 51000}
-	dst := &net.TCPAddr{IP: net.ParseIP("192.168.1.5"), Port: 25565}
-	h := proxyV2Header(src, dst)
-	if string(h[:12]) != string(proxyV2Sig) || h[12] != 0x21 || h[13] != 0x11 || binary.BigEndian.Uint16(h[14:16]) != 12 {
-		t.Fatalf("% x", h)
-	}
-	if !net.IP(h[16:20]).Equal(src.IP) || !net.IP(h[20:24]).Equal(dst.IP) || binary.BigEndian.Uint16(h[24:26]) != 51000 || binary.BigEndian.Uint16(h[26:28]) != 25565 {
-		t.Fatalf("% x", h)
-	}
-	h6 := proxyV2Header(&net.TCPAddr{IP: net.ParseIP("2001:db8::1"), Port: 1}, &net.TCPAddr{IP: net.ParseIP("2001:db8::2"), Port: 2})
-	if h6[13] != 0x21 || binary.BigEndian.Uint16(h6[14:16]) != 36 || len(h6) != 16+36 {
-		t.Fatalf("% x", h6)
-	}
-}
-
-// The doorway passes connections on with a PROXY header naming the player.
-func TestDoor(t *testing.T) {
-	paper, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer paper.Close()
-	got := make(chan []byte, 1)
-	go func() {
-		c, err := paper.Accept()
-		if err != nil {
-			return
-		}
-		defer c.Close()
-		buf := make([]byte, 28+5)
-		io.ReadFull(c, buf)
-		got <- buf
-		c.Write([]byte("pong"))
-	}()
-	free, _ := net.Listen("tcp", "127.0.0.1:0")
-	port := free.Addr().(*net.TCPAddr).Port
-	free.Close()
-	d := &door{playersPort: port, paperPort: paper.Addr().(*net.TCPAddr).Port}
-	if err := d.start(); err != nil {
-		t.Fatal(err)
-	}
-	defer d.stop()
-	c, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.Write([]byte("hello"))
-	b := <-got
-	if string(b[:12]) != string(proxyV2Sig) || !net.IP(b[16:20]).Equal(net.IPv4(127, 0, 0, 1)) || string(b[28:]) != "hello" {
-		t.Fatalf("% x", b)
-	}
-	reply := make([]byte, 4)
-	io.ReadFull(c, reply)
-	if string(reply) != "pong" {
-		t.Fatal(string(reply))
-	}
-	c.Close()
 }
 
 // ------------------------------------------------------------------ the tunnel, against a tiny sshd
@@ -291,12 +230,13 @@ func TestTunnelPinnedKey(t *testing.T) {
 	var sshPort int
 	fmt.Sscan(portS, &sshPort)
 	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshd.hostKey.PublicKey())))
-	hk, err := pinnedHostKey(line)
+	pk, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
 	if err != nil {
 		t.Fatal(err)
 	}
+	hk := ssh.FixedHostKey(pk)
 	up := make(chan struct{}, 1)
-	tn := &tunnel{cfg: TunnelConfig{Host: host, User: "hostmc", SSHPort: sshPort, Bind: "127.0.0.1", PublicPort: 30001}, hostKey: hk, name: "the relay",
+	tn := &tunnel{cfg: TunnelConfig{Host: host, User: "hostmc", SSHPort: sshPort, Bind: "127.0.0.1", PublicPort: 30001}, hostKey: hk, name: "your VPS",
 		target: func() string { return mc.Addr().String() }, onUp: func() { up <- struct{}{} }}
 	tn.start()
 	defer tn.stop()
@@ -325,10 +265,10 @@ func TestTunnelPinnedKey(t *testing.T) {
 	// A different host key: it refuses to log in.
 	_, other, _ := ed25519.GenerateKey(rand.Reader)
 	os, _ := ssh.NewSignerFromKey(other)
-	wrong, _ := pinnedHostKey(strings.TrimSpace(string(ssh.MarshalAuthorizedKey(os.PublicKey()))))
-	t2 := &tunnel{cfg: tn.cfg, hostKey: wrong, name: "the relay", target: tn.target}
+	wrong := ssh.FixedHostKey(os.PublicKey())
+	t2 := &tunnel{cfg: tn.cfg, hostKey: wrong, name: "your VPS", target: tn.target}
 	err = t2.once(make(chan struct{}))
-	if err == nil || !strings.Contains(err.Error(), "the relay") {
+	if err == nil || !strings.Contains(err.Error(), "your VPS") {
 		t.Fatal(err)
 	}
 }
@@ -352,8 +292,8 @@ func TestTrustFirstSeen(t *testing.T) {
 	}
 }
 
-// XenithOS Cloud's answers: the account and the relay, from a stand-in.
-func TestCloudRelay(t *testing.T) {
+// XenithOS Cloud's answers about the account, from a stand-in.
+func TestCloudAccount(t *testing.T) {
 	t.Setenv("MINENEST_HOME", t.TempDir())
 	var lastForm map[string]string
 	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -370,12 +310,6 @@ func TestCloudRelay(t *testing.T) {
 				return
 			}
 			io.WriteString(w, "name=Owen\ntoken=tok123\n")
-		case "/v1/relay/claim":
-			if r.PostForm.Get("token") != "tok123" {
-				w.WriteHeader(401)
-				return
-			}
-			io.WriteString(w, "relay=on\nstep=ok\nname="+r.PostForm.Get("name")+"\nstate=on\ndomain=mc.example\naddress="+r.PostForm.Get("name")+".mc.example:25566\nplayers_port=25566\nport=30007\nssh_host=relay.example\nssh_port=2222\nssh_user=hostmc\nhostkey=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\nproxy=off\nproxy_able=1\n")
 		default:
 			w.WriteHeader(404)
 		}
@@ -393,29 +327,8 @@ func TestCloudRelay(t *testing.T) {
 	if err != nil || a.Name != "Owen" || m.Settings().AccountToken != "tok123" {
 		t.Fatal(a, err)
 	}
-	ri, err := m.RelayAsk(t.Context(), "claim", "Brave-Otter")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if lastForm["name"] != "brave-otter" || !strings.HasPrefix(lastForm["key"], "ssh-ed25519 ") || len(strings.Fields(lastForm["key"])) != 2 || lastForm["proxy"] != "0" {
-		t.Fatal(lastForm)
-	}
-	if ri.Name != "brave-otter" || ri.Address != "brave-otter.mc.example:25566" || !ri.ProxyAble || ri.Proxy {
-		t.Fatal(ri)
-	}
-	// What it answered is kept, and a server can use the relay with it.
-	m2, _ := NewManager()
-	s := &Server{ID: "x", Dir: t.TempDir(), m: m2, state: Stopped}
-	s.cfg.Installed = &Installed{Flavor: "paper", Minecraft: "26.3"}
-	if err := m2.relay.canUse(s); err != nil {
-		t.Fatal(err)
-	}
-	w := m2.relay.wayFor(s).(*tunnelWay)
-	if w.t.cfg.Host != "relay.example" || w.t.cfg.SSHPort != 2222 || w.t.cfg.PublicPort != 30007 || w.t.cfg.Bind != "127.0.0.1" {
-		t.Fatal(w.t.cfg)
-	}
-	if h, p := w.target(); h != "brave-otter.mc.example" || p != 25566 {
-		t.Fatal(h, p)
+	if ai := m.AccountInfo(); !ai.SignedIn || ai.Account != "Owen" {
+		t.Fatal(ai)
 	}
 }
 
@@ -479,7 +392,7 @@ func TestOCSignIn(t *testing.T) {
 	if set.AccountToken != "tok9" || set.AccountName != "Owen" || set.OCAccount != "OwenOC" {
 		t.Fatal(set)
 	}
-	if ri := m.RelayInfo(); !ri.SignedIn || ri.OCAccount != "OwenOC" {
+	if ri := m.AccountInfo(); !ri.SignedIn || ri.OCAccount != "OwenOC" {
 		t.Fatal(ri)
 	}
 	if st := m.OCPoll(t.Context()); st.State != "none" {
@@ -506,5 +419,53 @@ func TestManagedUpdates(t *testing.T) {
 	}
 	if _, err := ApplyUpdate(t.Context(), nil); err == nil || !strings.Contains(err.Error(), "XenithOS") {
 		t.Fatal(err)
+	}
+}
+
+// A server saved with the way "relay" (and the old players' real addresses setting) still loads,
+// and goes back to home only with one plain note. Paper's proxy-protocol is put back, too.
+func TestOldRelayServerLoads(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MINENEST_HOME", home)
+	dir := filepath.Join(home, "servers", "old")
+	os.MkdirAll(filepath.Join(dir, "server", "config"), 0o755)
+	os.WriteFile(filepath.Join(dir, "nest.json"), []byte(`{"name":"Old","ram_mb":2048,"way":"relay","real_ips":true,"vps":{"tunnel":{"host":"","bind":"127.0.0.1"}}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "server", "config", "paper-global.yml"), []byte("proxies:\n  proxy-protocol: true\n"), 0o644)
+	m, err := NewManager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := m.servers["old"]
+	if s == nil {
+		t.Fatal("the server didn't load")
+	}
+	if s.Config().Way != "" || s.Config().RAM != 2048 {
+		t.Fatalf("%+v", s.Config())
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "nest.json"))
+	if strings.Contains(string(b), "relay") {
+		t.Fatalf("the saved way is still relay: %s", b)
+	}
+	if y, _ := os.ReadFile(filepath.Join(dir, "server", "config", "paper-global.yml")); !strings.Contains(string(y), "proxy-protocol: false") {
+		t.Fatalf("%s", y)
+	}
+	notes := 0
+	for _, l := range s.Lines(0) {
+		if strings.Contains(l.Text, "supporter relay has ended") {
+			notes++
+		}
+	}
+	if notes != 1 {
+		t.Fatalf("%d notes", notes)
+	}
+	// A second start of MineNest says nothing more, and the way can't be set to relay again.
+	m2, _ := NewManager()
+	for _, l := range m2.servers["old"].Lines(0) {
+		if strings.Contains(l.Text, "supporter relay") {
+			t.Fatal("the note came back")
+		}
+	}
+	if err := m2.SetWay(m2.servers["old"], "relay", nil); err == nil {
+		t.Fatal("relay was accepted")
 	}
 }

@@ -37,10 +37,9 @@ type Config struct {
 	Eula         string     `json:"eula,omitempty"` // when the user agreed to Minecraft's EULA in MineNest
 	Autostart    bool       `json:"autostart"`
 	AutoRestart  bool       `json:"auto_restart"`
-	Way          string     `json:"way"` // "", "playit", "vps" or "relay": the way in from the internet
+	Way          string     `json:"way"` // "", "playit" or "vps": the way in from the internet
 	VPS          VPSConfig  `json:"vps"`
 	Bedrock      bool       `json:"bedrock"`
-	RealIPs      bool       `json:"real_ips"` // players' real addresses through the relay (Paper)
 	Modpack      string     `json:"modpack,omitempty"`
 	ImportedFrom string     `json:"imported_from,omitempty"`
 	AutoBackup   AutoBackup `json:"auto_backup"`
@@ -76,7 +75,6 @@ type Server struct {
 	restarts []time.Time
 	saved    chan struct{}
 	busy     string // a job that has the server's files (install, restore...)
-	door     *door
 	way      way
 	exited   chan struct{}
 }
@@ -90,6 +88,7 @@ func (s *Server) load() error {
 	if s.cfg.Name == "" {
 		s.cfg.Name = s.ID
 	}
+	leaveRelay(s)
 	return nil
 }
 
@@ -122,23 +121,11 @@ func (s *Server) props() *Properties {
 
 // Port is the port players join at (server.properties).
 func (s *Server) Port() int {
-	s.mu.Lock()
-	d := s.door
-	s.mu.Unlock()
-	if d != nil {
-		return d.playersPort // Paper has its own port on the loopback meanwhile
-	}
 	p, _ := strconv.Atoi(s.props().GetDefault("server-port", "25565"))
 	if p <= 0 || p > 65535 {
 		p = DefaultPort
 	}
 	return p
-}
-
-func (s *Server) doorLocked() *door {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.door
 }
 
 // ------------------------------------------------------------------ console
@@ -233,9 +220,6 @@ func (s *Server) read(r io.Reader, cmd *exec.Cmd) {
 		s.addLineLocked(text, kind)
 		s.mu.Unlock()
 		if becameReady {
-			if d := s.doorLocked(); d != nil {
-				d.restoreProperties()
-			}
 			s.Note("The server is ready. Players can join now.")
 			go s.m.serverReady(s)
 		}
@@ -319,24 +303,6 @@ func (s *Server) Start() error {
 	}
 	args = append(args, cfg.Installed.Launch...)
 
-	// Players' real addresses through the relay: Paper listens on a port of its own on the
-	// loopback with proxy-protocol on, and a doorway on the players' port adds the header for
-	// everyone else (door.go).
-	var d *door
-	if cfg.Way == "relay" {
-		s.m.relay.syncProxy(s)
-	}
-	if s.m.wantsDoor(s) {
-		var err error
-		if d, err = prepareDoor(s, port); err != nil {
-			s.Note("Players' real addresses are off for this start: %v", err)
-			d = nil
-		} else {
-			args = append(args, "--host", "127.0.0.1", "--port", strconv.Itoa(d.paperPort))
-		}
-	} else {
-		paperProxyProtocol(s.Root(), false)
-	}
 	args = append(args, "nogui")
 
 	cmd := exec.Command(java, args...)
@@ -356,7 +322,7 @@ func (s *Server) Start() error {
 	s.mu.Lock()
 	s.cmd, s.stdin, s.state, s.started = cmd, stdin, Starting, time.Now()
 	s.players = map[string]time.Time{}
-	s.why, s.stopAsk, s.door = "", false, d
+	s.why, s.stopAsk = "", false
 	s.exited = make(chan struct{})
 	exited := s.exited
 	s.addLineLocked(fmt.Sprintf("Starting %s %s with %d MB of memory.", flavorName(cfg.Flavor), cfg.Installed.Minecraft, cfg.RAM), "nest")
@@ -365,11 +331,6 @@ func (s *Server) Start() error {
 	}
 	s.mu.Unlock()
 
-	if d != nil {
-		if err := d.start(); err != nil {
-			s.Note("The doorway for players' real addresses couldn't start: %v", err)
-		}
-	}
 	go s.read(pr, cmd)
 	go func() {
 		err := cmd.Wait()
@@ -391,8 +352,6 @@ func (s *Server) exitedWith(cmd *exec.Cmd, err error) {
 	s.state = Stopped
 	s.cmd, s.stdin = nil, nil
 	s.players = map[string]time.Time{}
-	d := s.door
-	s.door = nil
 	why := ""
 	if !asked {
 		why = s.crashReasonLocked(err)
@@ -405,10 +364,6 @@ func (s *Server) exitedWith(cmd *exec.Cmd, err error) {
 	}
 	restart := !asked && s.cfg.AutoRestart && wasRunning && s.restartAllowedLocked()
 	s.mu.Unlock()
-	if d != nil {
-		d.stop()
-		d.restoreProperties()
-	}
 	s.m.serverStopped(s)
 	if restart {
 		s.Note("Starting it again (automatic restart is on).")
