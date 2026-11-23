@@ -23,6 +23,7 @@ type Settings struct {
 	LANAccess    bool   `json:"lan_access"`   // the dashboard on the home network (remote.go)
 	LANPassword  string `json:"lan_password"` // its password, hashed
 	WebRemote    bool   `json:"web_remote"`   // the dashboard through the website, for supporters
+	RemoteFiles  bool   `json:"remote_files"` // other computers may change files, not only read them
 }
 
 // Manager is the daemon's state: every server, the jobs, the account and the shared ways in.

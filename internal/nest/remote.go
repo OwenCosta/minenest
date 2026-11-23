@@ -33,7 +33,8 @@ import (
 //   answer back (/v1/remote/reply). Nothing has to be opened on the router.
 //
 // Either way, what comes in goes to the same API the window uses, minus a few things only this
-// computer may do (stopping MineNest, these settings).
+// computer may do (stopping MineNest, these settings), and with files and programs read-only
+// unless "Let other computers change files" is on (files_api.go).
 
 const lanSessionDays = 30
 
@@ -84,7 +85,8 @@ type RemoteInfo struct {
 	WebState    string `json:"web_state"` // off, connecting, on, problem
 	WebNote     string `json:"web_note,omitempty"`
 	WebURL      string `json:"web_url"`
-	Here        bool   `json:"here"` // the window is on this computer (it can change these)
+	Here        bool   `json:"here"`  // the window is on this computer (it can change these)
+	Files       bool   `json:"files"` // other computers may change files (they can only read them otherwise)
 }
 
 func (m *Manager) lanPort() int { return m.Settings().APIPort + 1 }
@@ -95,7 +97,7 @@ func (m *Manager) RemoteInfo() RemoteInfo {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ri := RemoteInfo{LAN: set.LANAccess, HasPassword: set.LANPassword != "", Web: set.WebRemote, WebState: r.webState,
-		WebNote: r.webNote, LANError: r.lanErr, WebURL: strings.TrimRight(set.Cloud, "/") + "/remote/"}
+		WebNote: r.webNote, LANError: r.lanErr, Files: set.RemoteFiles, WebURL: strings.TrimRight(set.Cloud, "/") + "/remote/"}
 	if ip := lanAddress(); ip != "" {
 		ri.LANURL = fmt.Sprintf("http://%s:%d/", ip, m.lanPort())
 	}
@@ -106,7 +108,7 @@ func (m *Manager) RemoteInfo() RemoteInfo {
 }
 
 // SetRemote changes these settings (only from this computer).
-func (m *Manager) SetRemote(lan, web *bool, password *string) error {
+func (m *Manager) SetRemote(lan, web *bool, password *string, files *bool) error {
 	if password != nil {
 		if len(*password) < 8 {
 			return fmt.Errorf("pick a password of at least 8 letters")
@@ -122,6 +124,9 @@ func (m *Manager) SetRemote(lan, web *bool, password *string) error {
 			return fmt.Errorf("set a password first: computers at home sign in with it")
 		}
 		m.updateSettings(func(s *Settings) { s.LANAccess = *lan })
+	}
+	if files != nil {
+		m.updateSettings(func(s *Settings) { s.RemoteFiles = *files })
 	}
 	if web != nil {
 		if *web && m.Settings().AccountToken == "" {
@@ -183,7 +188,7 @@ func (m *Manager) forward(w http.ResponseWriter, r *http.Request, changes bool) 
 		http.Error(w, `{"error":"That can only be done on the computer MineNest runs on."}`, 403)
 		return
 	}
-	r2 := r.Clone(r.Context())
+	r2 := markElsewhere(r) // the API can tell this didn't come from this computer (files_api.go)
 	r2.Host = fmt.Sprintf("127.0.0.1:%d", m.Settings().APIPort)
 	r2.Header = http.Header{}
 	if ct := r.Header.Get("Content-Type"); ct != "" {

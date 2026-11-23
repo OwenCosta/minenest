@@ -146,3 +146,23 @@ var CommonProperties = []PropertyInfo{
 	{"enable-command-block", "Command blocks", "bool", nil, "false", ""},
 	{"server-port", "Port", "number", nil, "25565", "What players join at. Change it if another server uses it."},
 }
+
+// propertiesFromText reads properties from text that isn't (yet) in a file: a hand-edited
+// server.properties on its way to being saved.
+func propertiesFromText(text string) *Properties {
+	s := strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	p := &Properties{}
+	p.lines = strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(p.lines) == 1 && p.lines[0] == "" {
+		p.lines = nil
+	}
+	return p
+}
+
+// Text is the file's content as Save would write it.
+func (p *Properties) Text() string {
+	if len(p.lines) == 0 {
+		return ""
+	}
+	return strings.Join(p.lines, "\n") + "\n"
+}

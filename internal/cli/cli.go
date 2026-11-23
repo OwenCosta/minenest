@@ -44,6 +44,10 @@ const usage = `MineNest %s: easy Minecraft servers on Windows and Linux.
   minenest versions TYPE                which Minecraft versions a type can run
   minenest builds TYPE VERSION          its loader versions or builds (choose one with -b)
 
+  minenest files ls|cat|put|get|mkdir|mv|cp|rm|unzip|trash [-s SERVER]
+                                        the server's own files: look, upload, download, change.
+                                        rm only moves to the trash (minenest files for the rest)
+
   minenest import FOLDER [--name NAME] [-t TYPE] [-v VERSION]
                                         bring in a server you already have (it's copied)
 
@@ -91,7 +95,7 @@ type flags struct {
 
 var valueFlags = map[string]string{"-s": "server", "--server": "server", "-t": "type", "--type": "type", "-v": "version",
 	"--version": "version", "-m": "ram", "--memory": "ram", "--ram": "ram", "--modpack": "modpack", "--seed": "seed",
-	"--host": "host", "-b": "build", "--build": "build", "--loader": "build", "--user": "user", "--ssh-port": "ssh-port", "--port": "port", "--pin": "pin", "--name": "name", "-n": "lines", "--keep": "keep"}
+	"--host": "host", "-b": "build", "--build": "build", "--loader": "build", "--user": "user", "--ssh-port": "ssh-port", "--port": "port", "--pin": "pin", "--name": "name", "-n": "lines", "--keep": "keep", "--to": "to", "--into": "into"}
 
 func parse(args []string) flags {
 	f := flags{vals: map[string]string{}, bools: map[string]bool{}}
@@ -477,6 +481,8 @@ func run(args []string) error {
 			return err
 		}
 		return c.wait(j.Job)
+	case "files", "file":
+		return files(c, f)
 	case "internet", "way":
 		return internet(c, f)
 	case "bedrock":

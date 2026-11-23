@@ -86,6 +86,8 @@ minenest mods add simple-voice-chat
 minenest console                             # watch it and type commands
 minenest internet playit                     # let friends on the internet join
 minenest backup auto daily 03:30             # a backup every night, the newest ten kept
+minenest files ls plugins                    # a server's own files: look, upload, download
+minenest files put MyPlugin.jar --to plugins
 minenest create "Cobblemon" --modpack cobblemon-fabric
 ```
 
@@ -118,6 +120,57 @@ On **Settings and account**, two switches, both off until you turn them on:
 
 Either way you get the whole dashboard, console included. Stopping MineNest itself and these
 settings stay on the computer it runs on.
+
+Files are the exception to "the whole dashboard". Someone who can put a plugin in a server's
+folder can run programs on your computer, so from another computer the Files page is **look
+only**: browsing, reading, downloading. Uploading, editing, moving, deleting and unpacking, and
+uploading a plugin or mod from the Mods page, only work from another computer after you turn on
+**Let other computers change files** in the same settings (off unless you do). MineNest checks
+this itself, not just the page. Looking for servers on the computer's own folders and bringing
+one in by its path also stay on the computer MineNest runs on.
+
+## Files
+
+Each server has a **Files** page for its own folder (`servers/<name>/server`), and
+`minenest files` does the same from a terminal:
+
+```sh
+minenest files ls plugins
+minenest files cat server.properties
+minenest files put Essentials.jar --to plugins     # then restart the server to load it
+minenest files get world                            # a folder comes as a zip
+minenest files mv plugins/old.yml plugins/new.yml
+minenest files rm plugins/Old.jar                   # to the trash, not gone
+minenest files trash                                # what rm moved; trash restore ID, trash empty
+minenest files unzip packs/pack.zip
+```
+
+- Browse folders with their sizes and dates. Text files (properties, yml, yaml, json, toml, txt,
+  conf, cfg, mcfunction, js, sk and md, up to 2 MB) open in an editor; saving keeps the file's
+  line endings and encoding, writes through a temporary file so a crash never leaves half a file,
+  and says so if something else changed the file since you opened it. Logs open read only, showing
+  the newest lines, and can be downloaded whole. Other files can be downloaded, and a folder as
+  a zip.
+- Upload by dragging files onto the list or with the Upload button (up to 1 GB each, with a
+  progress bar). A plugin or mod `.jar` in `plugins` or `mods` is fine, and the page tells you the
+  server needs a restart to load it. Programs and scripts for Windows (`.exe`, `.bat`, `.cmd` and
+  the like) are refused.
+- Rename, move and copy never replace something without asking. **Delete** moves things to a
+  trash MineNest keeps for each server, outside the server's folder: you can put them back, and
+  only **Empty the trash** deletes for good. Anything that was replaced also goes there.
+- **Unzip** unpacks a zip where it is, after checking all of it: anything that would land outside
+  the folder, links, odd names, more than 50,000 files or more than 4 GB unpacked stops it before
+  a single file is written.
+- While the server is running, its world's region files, `session.lock`, `level.dat` and its own
+  program can't be changed, and the page says why. `server.properties` is saved through the same
+  checks as the Settings page, so the port can't be broken, and while players' real addresses
+  are on, the port and address MineNest set are kept.
+- It only reaches the server's own folder. MineNest's own files (its settings, keys, backups and
+  the trash) are out of reach. Names are refused if they use `..`, a full path, a drive letter,
+  a network path, `name:stream`, a Windows device name (`CON`, `NUL`, `COM1`...), a trailing dot
+  or space, or odd control characters. A link or junction in the folder is shown as a link and
+  never followed, for reading, writing, copying, zipping or deleting. Downloads are always sent
+  as attachments, so an uploaded web page can't run from MineNest's address.
 
 ## Updates
 

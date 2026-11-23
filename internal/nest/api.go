@@ -115,18 +115,27 @@ func localHost(host string) bool {
 	return h == "127.0.0.1" || h == "localhost" || h == "[::1]" || h == "::1"
 }
 
+// check is what every request has to pass: this computer's own address, the key, and (for
+// anything that changes things) the extra header.
+func (a *api) check(w http.ResponseWriter, r *http.Request) bool {
+	if !localHost(r.Host) {
+		http.Error(w, "MineNest only answers on this computer's own address", 403)
+		return false
+	}
+	if !a.authed(r) {
+		writeErr(w, apiError{401, "MineNest's key is missing or wrong"})
+		return false
+	}
+	if r.Method != "GET" && r.Header.Get("X-MineNest") != "1" {
+		writeErr(w, apiError{403, "missing the X-MineNest header"})
+		return false
+	}
+	return true
+}
+
 func (a *api) wrap(h handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !localHost(r.Host) {
-			http.Error(w, "MineNest only answers on this computer's own address", 403)
-			return
-		}
-		if !a.authed(r) {
-			writeErr(w, apiError{401, "MineNest's key is missing or wrong"})
-			return
-		}
-		if r.Method != "GET" && r.Header.Get("X-MineNest") != "1" {
-			writeErr(w, apiError{403, "missing the X-MineNest header"})
+		if !a.check(w, r) {
 			return
 		}
 		v, err := h(r)
@@ -135,6 +144,7 @@ func (a *api) wrap(h handler) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
 		if v == nil {
 			v = map[string]bool{"ok": true}
@@ -150,6 +160,7 @@ func writeErr(w http.ResponseWriter, err error) {
 		code = ae.Code
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
 	msg := err.Error()
 	if msg != "" {
@@ -161,13 +172,19 @@ func writeErr(w http.ResponseWriter, err error) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-func body(r *http.Request, v any) error {
+func body(r *http.Request, v any) error { return bodyN(r, v, 1<<20) }
+
+// bodyN reads a JSON request of at most limit bytes.
+func bodyN(r *http.Request, v any, limit int64) error {
 	if r.Body == nil {
 		return nil
 	}
-	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	b, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		return err
+	}
+	if int64(len(b)) > limit {
+		return apiError{413, "that request is too big"}
 	}
 	if len(strings.TrimSpace(string(b))) == 0 {
 		return nil
@@ -225,6 +242,7 @@ func (a *api) routes() http.Handler {
 		}
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'")
 		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-cache")
 		static.ServeHTTP(w, r)
 	})
@@ -281,8 +299,19 @@ func (a *api) routes() http.Handler {
 		}
 		return map[string]string{"id": s.ID, "job": j.ID}, nil
 	})
-	h("GET /api/import/find", func(r *http.Request) (any, error) { return a.m.FindServers(r.Context()), nil })
+	// Looking through this computer's folders for servers, and copying one in by its path, are for
+	// this computer only: from elsewhere they would let anyone signed in copy any folder into a
+	// server and read it back in the Files tab.
+	h("GET /api/import/find", func(r *http.Request) (any, error) {
+		if fromElsewhere(r) {
+			return nil, apiError{403, "Looking for servers can only be done on the computer MineNest runs on"}
+		}
+		return a.m.FindServers(r.Context()), nil
+	})
 	h("POST /api/import/zip", func(r *http.Request) (any, error) {
+		if err := a.m.filesChangeAllowed(r); err != nil {
+			return nil, err
+		}
 		q := r.URL.Query()
 		s, j, err := a.m.ImportZip(r.Body, ImportOptions{Name: q.Get("name"), Flavor: q.Get("flavor"), Version: q.Get("version"), ZipName: q.Get("filename")})
 		if err != nil {
@@ -291,6 +320,9 @@ func (a *api) routes() http.Handler {
 		return map[string]string{"id": s.ID, "job": j.ID}, nil
 	})
 	h("POST /api/import", func(r *http.Request) (any, error) {
+		if fromElsewhere(r) {
+			return nil, apiError{403, "Bringing in a server from a folder can only be done on the computer MineNest runs on"}
+		}
 		var o ImportOptions
 		if err := body(r, &o); err != nil {
 			return nil, err
@@ -609,6 +641,9 @@ func (a *api) routes() http.Handler {
 		return jobRef(j), err
 	})
 	h("POST /api/servers/{id}/addons/upload", func(r *http.Request) (any, error) {
+		if err := a.m.filesChangeAllowed(r); err != nil { // a jar is a program: same rule as the Files tab
+			return nil, err
+		}
 		s, err := a.server(r)
 		if err != nil {
 			return nil, err
@@ -699,6 +734,8 @@ func (a *api) routes() http.Handler {
 		return nil, nil
 	})
 
+	a.fileRoutes(mux, h)
+
 	// The account and the supporter relay
 	h("GET /api/account", func(r *http.Request) (any, error) { return a.m.RelayInfo(), nil })
 	h("POST /api/account/login", func(r *http.Request) (any, error) {
@@ -730,11 +767,12 @@ func (a *api) routes() http.Handler {
 			LAN      *bool   `json:"lan"`
 			Web      *bool   `json:"web"`
 			Password *string `json:"password"`
+			Files    *bool   `json:"files"`
 		}
 		if err := body(r, &o); err != nil {
 			return nil, err
 		}
-		if err := a.m.SetRemote(o.LAN, o.Web, o.Password); err != nil {
+		if err := a.m.SetRemote(o.LAN, o.Web, o.Password, o.Files); err != nil {
 			return nil, err
 		}
 		ri := a.m.RemoteInfo()

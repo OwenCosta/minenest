@@ -36,7 +36,7 @@ async function api(method, path, body, raw) {
   const r = await fetch(path.replace(/^\//, ""), opt);
   let data = null;
   try { data = await r.json(); } catch (e) {}
-  if (!r.ok) throw new Error((data && data.error) || `MineNest answered ${r.status}`);
+  if (!r.ok) { const err = new Error((data && data.error) || `MineNest answered ${r.status}`); err.status = r.status; throw err; }
   return data;
 }
 const sp = (p = "") => `/api/servers/${encodeURIComponent(S.cur)}${p}`;
@@ -167,7 +167,7 @@ function setTab(t) {
 function renderTab(full) {
   const s = S.status;
   if (!s) return;
-  ({ overview: tabOverview, console: tabConsole, addons: tabAddons, players: tabPlayers, settings: tabSettings, world: tabWorld, internet: tabInternet })[S.tab](s, full);
+  ({ overview: tabOverview, console: tabConsole, addons: tabAddons, players: tabPlayers, settings: tabSettings, world: tabWorld, files: tabFiles, internet: tabInternet })[S.tab](s, full);
 }
 
 const copyBtn = (text) => h("button", { class: "btn small", onclick: () => { navigator.clipboard.writeText(text); toast("Copied " + text); } }, "Copy");
@@ -881,7 +881,11 @@ async function extraSettings(el) {
     h("p", { class: "muted" }, "A perk for supporters on Patreon: open ", h("b", {}, ri.web_url), " on any computer, sign in with the same OCAccount, and MineNest is there. Nothing to open on your router."),
     h("label", { class: "check" }, h("input", { type: "checkbox", checked: ri.web, onchange: (e) => set({ web: e.target.checked }, e.target.checked ? "Connecting to the website." : "Off.") }),
       h("span", {}, "Let me use MineNest through the website")),
-    ri.web ? msg(ri.web_state === "on" ? "good" : ri.web_state === "problem" ? "bad" : "", stateWords[ri.web_state] || ri.web_state, " ", ri.web_note || (ri.web_state === "on" ? "Open the address above on another computer." : "")) : null));
+    ri.web ? msg(ri.web_state === "on" ? "good" : ri.web_state === "problem" ? "bad" : "", stateWords[ri.web_state] || ri.web_state, " ", ri.web_note || (ri.web_state === "on" ? "Open the address above on another computer." : "")) : null,
+    h("h3", { class: "mt" }, "Files"),
+    h("p", { class: "muted" }, "Computers that sign in this way can look at a server's files (the Files page) but not change them. Someone who can put a plugin in a server's folder can run programs on this computer, so changing files is off unless you turn it on."),
+    h("label", { class: "check" }, h("input", { type: "checkbox", checked: ri.files, onchange: (e) => set({ files: e.target.checked }, e.target.checked ? "Other computers can change files." : "Other computers can only look at files.") }),
+      h("span", {}, "Let other computers change files"), h("span", { class: "h" }, "Uploading, editing, moving, deleting and unpacking, and uploading plugins and mods."))));
 }
 
 // ------------------------------------------------------------------ start
