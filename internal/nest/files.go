@@ -943,6 +943,14 @@ func (s *Server) FileWrite(w WriteRequest) (*FileContent, error) {
 	if err := atomicWrite(t.Abs, perm, func(wr io.Writer) error { _, err := wr.Write(b); return err }); err != nil {
 		return nil, err
 	}
+	// A save of the same length within one tick of the clock would look like the same version, and a
+	// second window's older copy could then be saved over it. Move the time on so it can't.
+	if t.exists() {
+		if fi, err := os.Stat(t.Abs); err == nil && versionOf(fi) == versionOf(t.Info) {
+			later := t.Info.ModTime().Add(time.Millisecond)
+			os.Chtimes(t.Abs, later, later)
+		}
+	}
 	if t.Rel != "" && s.State() != Stopped {
 		s.Note("%s was changed in the file manager. Restart the server for it to count.", t.Name)
 	}

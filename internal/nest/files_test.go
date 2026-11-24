@@ -1431,10 +1431,7 @@ func TestDownloadsAreAlwaysAttachments(t *testing.T) {
 	put(t, s, "evil.html", html)
 	put(t, s, "evil.svg", `<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>`)
 	put(t, s, "evil.txt", html)
-	weird := "we'ird;nameé.yml"
-	if runtime.GOOS != "windows" {
-		weird = "we\"ird nameé.yml" // a quote in a name would break a naive header
-	}
+	weird := "we'ird;name é.yml" // a quote can't be in a name at all, so these are the awkward ones left
 	put(t, s, "plugins/"+weird, "a")
 	put(t, s, "folder/x.html", html)
 	check := func(path, ctype string) *httptest.ResponseRecorder {
